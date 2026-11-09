@@ -1,0 +1,316 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { ChartColumn, Search, Settings } from "lucide-react";
+import {
+  type BillRow,
+  type Category,
+  billsInDateRange,
+  budgetCycle,
+  daysUntilCycleEnd,
+  getBudgets,
+  loadCategoryRows,
+  recentBills,
+} from "../db";
+import { buildCategoryTree, findCategory } from "../lib/category";
+import {
+  formatMoneyCompact,
+  todayStr,
+  weekdayShort,
+} from "../lib/format";import { getSetting } from "../settings";
+import { IconBadge } from "../components/ui/IconBadge";
+import { ProgressRing } from "../components/ui/ProgressRing";
+import { useLocale } from "../hooks/useLocale";
+
+interface DayGroup {
+  date: string;
+  bills: BillRow[];
+  expenseCents: number;
+}
+
+interface HomeData {
+  todayCents: number;
+  monthCents: number;
+  groups: DayGroup[];
+  budgetTotal: number;
+  budgetSpent: number;
+  daysLeft: number;
+  categories: Category[];
+}
+
+async function loadHome(): Promise<HomeData> {
+  const rows = await loadCategoryRows();
+  const categories = buildCategoryTree(rows);
+  const billingDay = Math.min(
+    Math.max(Number((await getSetting("billing_day")) ?? "1") || 1, 1),
+    31,
+  );
+  const cycle = budgetCycle(billingDay);
+  const [recent, cycleBills, budgets] = await Promise.all([
+    recentBills(10),
+    billsInDateRange(cycle.from, cycle.to),
+    getBudgets(),
+  ]);
+
+  const today = todayStr();
+  let todayCents = 0;
+  let monthCents = 0;
+  for (const bill of cycleBills) {
+    if (bill.kind !== "expense") continue;
+    monthCents += bill.amount_cents;
+    if (bill.date === today) todayCents += bill.amount_cents;
+  }
+
+  const byDay = new Map<string, BillRow[]>();
+  for (const bill of recent) {
+    const list = byDay.get(bill.date) ?? [];
+    list.push(bill);
+    byDay.set(bill.date, list);
+  }
+  const groups: DayGroup[] = [...byDay.entries()].map(([date, bills]) => ({
+    date,
+    bills,
+    expenseCents: bills
+      .filter((b) => b.kind === "expense")
+      .reduce((sum, b) => sum + b.amount_cents, 0),
+  }));
+
+  let budgetSpent = 0;
+  for (const bill of cycleBills) {
+    if (bill.kind === "expense" && !bill.exclude_budget) {
+      budgetSpent += bill.amount_cents;
+    }
+  }
+
+  return {
+    todayCents,
+    monthCents,
+    groups,
+    budgetTotal: budgets.total,
+    budgetSpent,
+    daysLeft: daysUntilCycleEnd(cycle),
+    categories,
+  };
+}
+
+const EMPTY: HomeData = {
+  todayCents: 0,
+  monthCents: 0,
+  groups: [],
+  budgetTotal: 0,
+  budgetSpent: 0,
+  daysLeft: 1,
+  categories: [],
+};
+
+export function Home() {
+  const { t } = useTranslation();
+  const { locale } = useLocale();
+  const navigate = useNavigate();
+  const [data, setData] = useState<HomeData>(EMPTY);
+
+  useEffect(() => {
+    let alive = true;
+    loadHome()
+      .then((d) => alive && setData(d))
+      .catch(() => alive && setData(EMPTY));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const remaining = data.budgetTotal - data.budgetSpent;
+  const progress =
+    data.budgetTotal > 0 ? data.budgetSpent / data.budgetTotal : 0;
+  const dailyAllowance =
+    data.budgetTotal > 0 ? Math.max(remaining, 0) / data.daysLeft : 0;
+
+  const nameOf = (bill: BillRow) => {
+    const cat = findCategory(data.categories, bill.category_id);
+    return cat
+      ? cat.name_key
+        ? t(cat.name_key)
+        : cat.name
+      : t("common.empty");
+  };
+  const iconOf = (bill: BillRow) =>
+    findCategory(data.categories, bill.category_id) ?? undefined;
+
+  return (
+    <div className="relative flex h-full flex-col overflow-hidden">
+      {/* 渐变头部（延伸到状态栏后方，内部含预算卡） */}
+      <header className="bg-gradient-to-r from-brand-1 to-brand-2 px-4 pt-[env(safe-area-inset-top)] text-white">
+        <div className="flex items-center gap-2 pt-3">
+          <button
+            type="button"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full active:bg-white/20"
+            onClick={() => navigate("/settings")}
+            aria-label={t("settings.title")}
+          >
+            <Settings size={20} />
+          </button>
+          <button
+            type="button"
+            className="ml-auto flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-white/25 px-3 text-xs text-white/90"
+            onClick={() => navigate("/bills")}
+          >
+            <Search size={14} />
+            <span>{t("home.searchBills")}</span>
+          </button>
+          <button
+            type="button"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full active:bg-white/20"
+            onClick={() => navigate("/stats")}
+            aria-label={t("nav.stats")}
+          >
+            <ChartColumn size={20} />
+          </button>
+        </div>
+        <div className="mt-3 flex items-center">
+          <div className="flex-1 text-center">
+            <div className="text-xs text-white/80">{t("home.todayExpense")}(¥)</div>
+            <div className="mt-1 text-2xl font-light">
+              {formatMoneyCompact(data.todayCents, locale)}
+            </div>
+          </div>
+          <div className="h-10 w-px bg-white/30" />
+          <div className="flex-1 text-center">
+            <div className="text-xs text-white/80">{t("home.monthExpense")}(¥)</div>
+            <div className="mt-1 text-2xl font-light">
+              {formatMoneyCompact(data.monthCents, locale)}
+            </div>
+          </div>
+        </div>
+
+        {/* 月预算卡（头部内，紧凑布局） */}
+        <div className="mt-3 pb-3">
+          <div
+            className="rounded-2xl bg-card px-3 py-2.5"
+            onClick={() => navigate("/budget")}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => e.key === "Enter" && navigate("/budget")}
+          >
+            {data.budgetTotal <= 0 ? (
+              <div className="py-2 text-center text-sm text-ink-3">
+                {t("budget.none")} · {t("home.setBudget")} →
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <div className="relative shrink-0">
+                  <ProgressRing progress={progress} size={56} stroke={5} />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-xs font-semibold text-ink">
+                      {formatMoneyCompact(Math.max(remaining, 0), locale)}
+                    </span>
+                    <span className="text-[9px] text-ink-3">
+                      {t("home.budgetRemaining")}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-1 items-center justify-around">
+                  <div className="text-center">
+                    <div className="text-[10px] text-ink-3">{t("home.budgetDaily")}</div>
+                    <div className="text-sm font-semibold text-ink">
+                      {formatMoneyCompact(Math.floor(dailyAllowance), locale)}
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-[10px] text-ink-3">{t("home.budgetDaysLeft")}</div>
+                    <div className="text-sm font-semibold text-ink">
+                      {data.daysLeft}
+                      {t("home.budgetDaysUnit")}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* 内容区：最近记录 */}
+      <div className="flex-1 overflow-y-auto px-3 pt-4 pb-28">
+          <div className="flex items-center justify-between px-1 pb-1">
+            <h2 className="text-sm font-bold text-ink">
+              {t("home.recentBills")}
+            </h2>
+            <button
+              type="button"
+              className="text-sm text-ink-3"
+              onClick={() => navigate("/bills")}
+            >
+              {t("home.viewAll")} ›
+            </button>
+          </div>
+          {data.groups.length === 0 && (
+            <div className="rounded-2xl bg-card py-10 text-center text-sm text-ink-3">
+              {t("common.empty")}
+            </div>
+          )}
+          {data.groups.map((group) => (
+            <div key={group.date} className="mt-2">
+              <div className="flex justify-between px-1 py-1 text-xs text-ink-3">
+                <span>
+                  {group.date} {weekdayShort(group.date, locale)}
+                </span>
+                <span>
+                  {t("home.dayExpense")}: {formatMoneyCompact(group.expenseCents, locale)}
+                </span>
+              </div>
+              <div className="divide-y divide-gray-100 rounded-2xl bg-card dark:divide-white/5">
+                {group.bills.map((bill) => {
+                  const cat = iconOf(bill);
+                  return (
+                    <button
+                      key={bill.id}
+                      type="button"
+                      className="flex w-full items-center px-3 py-2.5 text-left active:bg-chip"
+                      onClick={() => navigate(`/add?id=${bill.id}`)}
+                    >
+                      <IconBadge
+                        icon={cat?.icon}
+                        iconImage={cat?.icon_image}
+                        nameKey={cat?.name_key}
+                        iconType={cat?.icon_type}
+                      />
+                      <div className="ml-3 min-w-0 flex-1">
+                        <div className="truncate text-[15px] text-ink">
+                          {nameOf(bill)}
+                        </div>
+                        {bill.note && (
+                          <div className="truncate text-xs text-ink-3">
+                            {bill.note}
+                          </div>
+                        )}
+                      </div>
+                      <span
+                        className={
+                          bill.kind === "expense"
+                            ? "ml-3 text-[15px] text-expense"
+                            : "ml-3 text-[15px] text-income"
+                        }
+                      >
+                        {bill.kind === "expense" ? "-" : "+"}
+                        {formatMoneyCompact(bill.amount_cents, locale)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+      </div>
+
+      {/* FAB */}
+      <button
+        type="button"
+        className="absolute bottom-6 left-1/2 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-full bg-gradient-to-r from-brand-1 to-brand-2 text-3xl font-light text-white shadow-lg shadow-brand-2/40 active:scale-95"
+        onClick={() => navigate("/add")}
+        aria-label={t("nav.add")}
+      >
+        ＋
+      </button>
+    </div>
+  );
+}

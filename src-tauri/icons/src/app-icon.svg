@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- BunPocket 图标源文件：存钱兔（方案4），品牌紫底（品牌色 #8b7cf8 色系） -->
+  <!-- 前景主体收在自适应图标安全区内（中央 61% 圆），背景满幅渐变 -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9C8BFA"/>
+      <stop offset="1" stop-color="#6D5AE6"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <g fill="#FFF7EC">
+    <rect x="389.1" y="225.3" width="92.2" height="225.3" rx="46.1" transform="rotate(-8 435.2 337.9)"/>
+    <rect x="542.7" y="225.3" width="92.2" height="225.3" rx="46.1" transform="rotate(8 588.8 337.9)"/>
+  </g>
+  <g fill="#FFC1AC">
+    <rect x="412.7" y="266.2" width="45.1" height="133.1" rx="22.5" transform="rotate(-8 435.2 337.9)"/>
+    <rect x="566.3" y="266.2" width="45.1" height="133.1" rx="22.5" transform="rotate(8 588.8 337.9)"/>
+  </g>
+  <circle cx="512" cy="307.2" r="61.4" fill="#FFD249" stroke="#E09F1F" stroke-width="16.4"/>
+  <path d="M487.4 288.8l24.6 30.7 24.6-30.7M512 319.5v26.6M496.6 327.7h30.7" fill="none" stroke="#B27E0F" stroke-width="12.3" stroke-linecap="round"/>
+  <circle cx="512" cy="593.9" r="194.6" fill="#FFF7EC"/>
+  <rect x="435.2" y="445.4" width="153.6" height="41" rx="20.5" fill="#514B7A"/>
+  <path d="M414.7 599q25.6-32.8 51.2 0M558.1 599q25.6-32.8 51.2 0" fill="none" stroke="#514B7A" stroke-width="18.4" stroke-linecap="round"/>
+  <path d="M497.7 628.7l14.3 18.4 14.3-18.4Z" fill="#FF9E8E"/>
+  <path d="M479.2 667.6q16.4 18.4 32.8 0M512 667.6q16.4 18.4 32.8 0" fill="none" stroke="#514B7A" stroke-width="15.4" stroke-linecap="round"/>
+  <circle cx="394.2" cy="640" r="24.6" fill="#FFC1AC"/>
+  <circle cx="629.8" cy="640" r="24.6" fill="#FFC1AC"/>
+</svg>

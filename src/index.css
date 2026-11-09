@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+/* 深色模式：由 useTheme 在 <html> 上切换 .dark 类 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* 语义设计 token——组件样式只允许使用这些，禁止裸色值 */
+@theme {
+  --color-page: #f6f7f9;
+  --color-card: #ffffff;
+  --color-ink: #1a1c20;
+  --color-ink-2: #6b7280;
+  --color-ink-3: #a1a7b3;
+  --color-line: #eceef1;
+  --color-chip: #f5f6f8;
+  --color-brand: #8b7cf8;
+  --color-brand-1: #5a9be8;
+  --color-brand-2: #9c7cf0;
+  --color-expense: #f55e5e;
+  --color-income: #2fbf8f;
+  --color-overlay: color-mix(in srgb, #1a1c20 45%, transparent);
+  --color-danger: #f55e5e;
+}
+
+/* 深色模式变量覆盖（先填基础值，后续统一调优） */
+.dark {
+  --color-page: #121316;
+  --color-card: #1d1f24;
+  --color-ink: #eceef1;
+  --color-ink-2: #9ca3af;
+  --color-ink-3: #6b7280;
+  --color-line: #2a2d33;
+  --color-chip: #26282e;
+  --color-overlay: color-mix(in srgb, #000000 55%, transparent);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-page);
+  color: var(--color-ink);
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ---------- Base UI 弹层过渡 ---------- */
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+@keyframes fade-out {
+  to { opacity: 0; }
+}
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+}
+@keyframes sheet-down {
+  to { transform: translateY(100%); }
+}
+@keyframes zoom-in {
+  from { opacity: 0; transform: scale(0.92); }
+}
+@keyframes zoom-out {
+  to { opacity: 0; transform: scale(0.92); }
+}
+@keyframes toast-up {
+  from { opacity: 0; transform: translateY(16px); }
+}
+
+.sheet-backdrop {
+  transition: opacity 0.25s ease;
+}
+.sheet-backdrop[data-starting-style],
+.sheet-backdrop[data-ending-style] {
+  opacity: 0;
+}
+.sheet-popup {
+  transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.sheet-popup[data-starting-style],
+.sheet-popup[data-ending-style] {
+  transform: translateY(100%);
+}
+
+.zoom-backdrop {
+  transition: opacity 0.2s ease;
+}
+.zoom-backdrop[data-starting-style],
+.zoom-backdrop[data-ending-style] {
+  opacity: 0;
+}
+.zoom-popup {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.zoom-popup[data-starting-style],
+.zoom-popup[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.92);
+}
+
+.toast-item {
+  animation: toast-up 0.25s ease;
+}
+
+/* 滚轮选择器渐隐遮罩 */
+.wheel-fade {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black 22%,
+    black 78%,
+    transparent 100%
+  );
+}
+
+/* 页面切换过渡 */
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+.page-in {
+  animation: page-in 0.18s ease-out;
+}
+
+/* 日历切月滑动动画 */
+@keyframes cal-next {
+  from {
+    opacity: 0.4;
+    transform: translateX(28px);
+  }
+}
+@keyframes cal-prev {
+  from {
+    opacity: 0.4;
+    transform: translateX(-28px);
+  }
+}
+.cal-next {
+  animation: cal-next 0.2s ease-out;
+}
+.cal-prev {
+  animation: cal-prev 0.2s ease-out;
+}

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_desc">"今日支出、本月支出与剩余预算速览"</string>
+    <string name="widget_today">"今日支出"</string>
+    <string name="widget_month">"本月支出"</string>
+    <string name="widget_budget">"剩余预算"</string>
+</resources>

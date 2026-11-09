@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 108 108">
+  <!-- Android 自适应图标前景层：仅图形，透明背景，108dp 网格，主体在安全区内 -->
+  <g transform="translate(4 4)">
+    <g fill="#FFF7EC">
+      <rect x="38" y="22" width="9" height="22" rx="4.5" transform="rotate(-8 42.5 33)"/>
+      <rect x="53" y="22" width="9" height="22" rx="4.5" transform="rotate(8 57.5 33)"/>
+    </g>
+    <g fill="#FFC1AC">
+      <rect x="40.3" y="26" width="4.4" height="13" rx="2.2" transform="rotate(-8 42.5 33)"/>
+      <rect x="55.3" y="26" width="4.4" height="13" rx="2.2" transform="rotate(8 57.5 33)"/>
+    </g>
+    <circle cx="50" cy="30" r="6" fill="#FFD249" stroke="#E09F1F" stroke-width="1.6"/>
+    <path d="M47.6 28.2l2.4 3 2.4-3M50 31.2v2.6M48.5 32h3" fill="none" stroke="#B27E0F" stroke-width="1.2" stroke-linecap="round"/>
+    <circle cx="50" cy="58" r="19" fill="#FFF7EC"/>
+    <rect x="42.5" y="43.5" width="15" height="4" rx="2" fill="#514B7A"/>
+    <path d="M40.5 58.5q2.5-3.2 5 0M54.5 58.5q2.5-3.2 5 0" fill="none" stroke="#514B7A" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M48.6 61.4l1.4 1.8 1.4-1.8Z" fill="#FF9E8E"/>
+    <path d="M46.8 65.2q1.6 1.8 3.2 0M50 65.2q1.6 1.8 3.2 0" fill="none" stroke="#514B7A" stroke-width="1.5" stroke-linecap="round"/>
+    <circle cx="38.5" cy="62.5" r="2.4" fill="#FFC1AC"/>
+    <circle cx="61.5" cy="62.5" r="2.4" fill="#FFC1AC"/>
+  </g>
+</svg>
