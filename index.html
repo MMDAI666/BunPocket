@@ -7,6 +7,22 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <title>BunPocket</title>
+    <script>
+      // 深色模式冷启动预上色：读 localStorage 镜像，避免 React/DB 就绪前白屏闪烁。
+      // 镜像由 src/lib/theme.ts 维护；缺失时按系统主题（应用默认设置为 auto）。
+      (function () {
+        try {
+          var setting = localStorage.getItem("bp:theme-setting");
+          var dark =
+            setting === "dark" ||
+            ((!setting || setting === "auto") &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (e) {
+          /* localStorage 不可用时忽略，由 React 侧兜底 */
+        }
+      })();
+    </script>
   </head>
 
   <body>

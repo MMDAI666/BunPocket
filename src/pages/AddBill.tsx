@@ -311,8 +311,15 @@ export function AddBill() {
       />
 
       {/* 日期 / 时间 / 备注历史 弹层 */}
-      <Sheet open={dateOpen} onOpenChange={setDateOpen} title={t("add.dateToday")}>
-        <MonthCalendar value={date} onChange={setDate} locale={locale} />
+      <Sheet open={dateOpen} onOpenChange={setDateOpen} title={t("add.pickDate")}>
+        <MonthCalendar
+          value={date}
+          onChange={(next) => {
+            setDate(next);
+            setDateOpen(false);
+          }}
+          locale={locale}
+        />
       </Sheet>
       <Sheet open={timeOpen} onOpenChange={setTimeOpen}>
         <TimePicker value={time} onChange={setTime} />

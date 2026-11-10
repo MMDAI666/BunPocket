@@ -54,8 +54,10 @@ export function Chart({ option, className, onEvents }: ChartProps) {
     };
   }, []);
 
+  // 同一实例会在不同结构（如统计页月度柱状图 ↔ 年度折线图）之间切换，
+  // 必须 notMerge 整体替换，否则旧 series/legend 会残留在新图上。
   useEffect(() => {
-    chartRef.current?.setOption(option);
+    chartRef.current?.setOption(option, { notMerge: true });
   }, [option]);
 
   return (

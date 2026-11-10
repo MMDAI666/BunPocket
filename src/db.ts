@@ -49,20 +49,27 @@ export interface NewBill {
   time: string;
 }
 
-let db: Database | null = null;
+let dbPromise: Promise<Database> | null = null;
 
-export async function getDb(): Promise<Database> {
-  if (!db) {
-    db = await Database.load("sqlite:bunpocket.db");
+/** 串行化首次加载：并发调用共享同一个 load Promise，避免插件重复建连接池 */
+export function getDb(): Promise<Database> {
+  if (!dbPromise) {
+    dbPromise = Database.load("sqlite:bunpocket.db").catch((e) => {
+      // 失败不缓存 rejected promise，允许后续重试（如迁移失败修复后重开）
+      dbPromise = null;
+      throw e;
+    });
   }
-  return db;
+  return dbPromise;
 }
 
 /** 恢复备份前必须关闭连接池，再清空缓存让下次 getDb 重开 */
 export async function closeDb(): Promise<void> {
-  if (db) {
-    await db.close();
-    db = null;
+  const pending = dbPromise;
+  dbPromise = null;
+  if (pending) {
+    const database = await pending;
+    await database.close();
   }
 }
 
@@ -129,6 +136,8 @@ export async function categoryDeleteBlocker(id: number): Promise<"children" | "b
 
 export async function deleteCategory(id: number): Promise<void> {
   const database = await getDb();
+  // budget 表没有外键，删除分类时同步清理其预算行，避免永久孤儿数据
+  await database.execute("DELETE FROM budget WHERE category_id = $1", [id]);
   await database.execute("DELETE FROM category WHERE id = $1", [id]);
 }
 
@@ -216,7 +225,9 @@ export async function searchBills(keyword: string): Promise<BillRow[]> {
 export async function recentNotes(limit = 10): Promise<string[]> {
   const database = await getDb();
   const rows = await database.select<{ note: string }[]>(
-    `SELECT DISTINCT note FROM bill WHERE note IS NOT NULL AND note != ''
+    `SELECT note FROM bill
+     WHERE note IS NOT NULL AND note != ''
+     GROUP BY note
      ORDER BY MAX(created_at) DESC LIMIT $1`,
     [limit],
   );

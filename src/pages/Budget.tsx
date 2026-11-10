@@ -169,7 +169,7 @@ export function Budget() {
       <Sheet
         open={editCatId != null}
         onOpenChange={(v) => !v && setEditCatId(null)}
-        title={t("budget.total")}
+        title={editCatId === 0 ? t("budget.total") : t("budget.categoryAmount")}
         footer={
           <div className="flex gap-3">
             <input

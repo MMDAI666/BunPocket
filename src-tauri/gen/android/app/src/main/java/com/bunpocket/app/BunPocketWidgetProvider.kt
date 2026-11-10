@@ -16,7 +16,8 @@ import java.util.Calendar
 /**
  * 1x4 桌面小组件：今日支出 / 本月支出 / 剩余月预算，整条点击打开"记一笔"。
  * 数据直接只读打开 tauri-plugin-sql 的 bunpocket.db（应用 dataDir 根目录），
- * 口径与前端一致：本月按结算日周期，剩余 = 总预算 - 周期内不含 exclude_budget 的支出。
+ * 口径与前端一致：本月支出按自然月；剩余预算按结算日周期，
+ * 剩余 = 总预算 - 周期内不含 exclude_budget 的支出。
  */
 class BunPocketWidgetProvider : AppWidgetProvider() {
 
@@ -88,10 +89,12 @@ class BunPocketWidgetProvider : AppWidgetProvider() {
                     val cycle = budgetCycle(billingDay)
 
                     val todayCents = sumExpense(db, "date = date('now','localtime')", null)
+                    // 页头"本月支出"按自然月，与 App 首页/统计页口径一致；预算剩余按结算周期
+                    val month = monthRange()
                     val monthCents = sumExpense(
                         db,
                         "date BETWEEN ? AND ?",
-                        arrayOf(cycle.first, cycle.second),
+                        arrayOf(month.first, month.second),
                     )
                     val total = rawLong(db, "SELECT amount_cents FROM budget WHERE category_id = 0")
                     val spent = sumExpense(
@@ -138,6 +141,17 @@ class BunPocketWidgetProvider : AppWidgetProvider() {
             db.rawQuery(sql, null).use { cursor ->
                 return if (cursor.moveToFirst()) cursor.getLong(0) else null
             }
+        }
+
+        /** 当前自然月 [1 号, 月末]，与前端"本月支出"口径一致 */
+        private fun monthRange(): Pair<String, String> {
+            val now = Calendar.getInstance()
+            val y = now.get(Calendar.YEAR)
+            val m = now.get(Calendar.MONTH)
+            return Pair(
+                "%04d-%02d-01".format(y, m + 1),
+                "%04d-%02d-%02d".format(y, m + 1, lastDay(y, m)),
+            )
         }
 
         /** 结算日 B 的预算周期 [B号, 下月B-1号]，与前端 db.ts budgetCycle 规则一致 */

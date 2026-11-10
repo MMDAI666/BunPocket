@@ -46,19 +46,41 @@ async function loadHome(): Promise<HomeData> {
     31,
   );
   const cycle = budgetCycle(billingDay);
-  const [recent, cycleBills, budgets] = await Promise.all([
+
+  // 页头"本月支出"按自然月统计（与统计页口径一致）；预算卡按结算周期。
+  // 两个区间可能错位，一次性取并集后按各自区间分别累加。
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const monthFrom = `${year}-${pad(month)}-01`;
+  const monthTo = `${year}-${pad(month)}-${pad(new Date(year, month, 0).getDate())}`;
+  const rangeFrom = cycle.from < monthFrom ? cycle.from : monthFrom;
+  const rangeTo = cycle.to > monthTo ? cycle.to : monthTo;
+
+  const [recent, rangeBills, budgets] = await Promise.all([
     recentBills(10),
-    billsInDateRange(cycle.from, cycle.to),
+    billsInDateRange(rangeFrom, rangeTo),
     getBudgets(),
   ]);
 
   const today = todayStr();
   let todayCents = 0;
   let monthCents = 0;
-  for (const bill of cycleBills) {
+  let budgetSpent = 0;
+  for (const bill of rangeBills) {
     if (bill.kind !== "expense") continue;
-    monthCents += bill.amount_cents;
     if (bill.date === today) todayCents += bill.amount_cents;
+    if (bill.date >= monthFrom && bill.date <= monthTo) {
+      monthCents += bill.amount_cents;
+    }
+    if (
+      bill.date >= cycle.from &&
+      bill.date <= cycle.to &&
+      !bill.exclude_budget
+    ) {
+      budgetSpent += bill.amount_cents;
+    }
   }
 
   const byDay = new Map<string, BillRow[]>();
@@ -74,13 +96,6 @@ async function loadHome(): Promise<HomeData> {
       .filter((b) => b.kind === "expense")
       .reduce((sum, b) => sum + b.amount_cents, 0),
   }));
-
-  let budgetSpent = 0;
-  for (const bill of cycleBills) {
-    if (bill.kind === "expense" && !bill.exclude_budget) {
-      budgetSpent += bill.amount_cents;
-    }
-  }
 
   return {
     todayCents,
