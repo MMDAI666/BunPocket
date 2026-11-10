@@ -190,7 +190,8 @@ async function createBackup(prefix = BACKUP_PREFIX): Promise<BackupInfo> {
   await db.execute(`VACUUM INTO '${partialPath.replace(/'/g, "''")}'`);
   try {
     await verifyBackupFile(partialName);
-  } catch (e) {    try {
+  } catch (e) {
+    try {
       await remove(partialPath);
     } catch {
       /* 尽力清理 */
@@ -214,7 +215,21 @@ async function rotateBackups(keep: number): Promise<void> {
   }
 }
 
-async function listPreRestoreBackups(): Promise<string[]> {
+export interface PreRestoreSnapshot {
+  name: string;
+  date: Date;
+}
+
+function parsePreRestoreName(name: string): Date | null {
+  const m = name.match(
+    /^prerestore-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})\.db$/,
+  );
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+}
+
+/** 恢复前自动快照列表（最新在前），设置页可手动回退到最近一份 */
+export async function listPreRestoreSnapshots(): Promise<PreRestoreSnapshot[]> {
   try {
     const entries = await readDir(await backupDirPath());
     return entries
@@ -224,8 +239,11 @@ async function listPreRestoreBackups(): Promise<string[]> {
           e.name.startsWith(PRERESTORE_PREFIX) &&
           e.name.endsWith(".db"),
       )
-      .map((e) => e.name)
-      .sort((a, b) => b.localeCompare(a));
+      .map((e) => ({
+        name: e.name,
+        date: parsePreRestoreName(e.name) ?? new Date(0),
+      }))
+      .sort((a, b) => b.name.localeCompare(a.name));
   } catch {
     return [];
   }
@@ -233,11 +251,11 @@ async function listPreRestoreBackups(): Promise<string[]> {
 
 /** 只保留最近一份"恢复前快照"，避免占空间 */
 async function cleanupPreRestoreBackups(keep = 1): Promise<void> {
-  const list = await listPreRestoreBackups();
+  const list = await listPreRestoreSnapshots();
   const dir = await backupDirPath();
-  for (const name of list.slice(keep)) {
+  for (const item of list.slice(keep)) {
     try {
-      await remove(await join(dir, name));
+      await remove(await join(dir, item.name));
     } catch {
       /* 清理失败不影响主流程 */
     }
@@ -376,63 +394,85 @@ export async function applyPendingRestore(): Promise<boolean> {
 }
 
 /**
- * 用最新一份"可用且 schema 版本不高于当前"的备份覆盖当前库。
- * 同版本：本进程内换库并 reload；
- * 旧版本：写入 pending-restore，返回 restart-required（需完全退出并重开应用，由新进程执行迁移）。
- * 新版本备份：拒绝（提示先升级应用）。
+ * 从候选文件名里挑第一份"可用且 schema 版本不高于当前"的恢复：
+ * 同版本：本进程内换库并 reload；旧版本：写 pending-restore 返回 restart-required；
+ * 新版本：跳过（提示先升级应用）。调用方需已持有 withBackupLock。
+ *
+ * @param backupBeforeRestore 是否在恢复前生成"当前库快照"。从常规备份恢复时为 true；
+ *        从 prerestore 快照恢复时必须为 false——否则新快照 + 只保留一份的清理会删掉
+ *        正在恢复的那份快照。
  */
-export async function restoreLatestBackup(): Promise<RestoreResult> {
-  return withBackupLock(async () => {
-    if (!isTauri) throw new Error("fs unavailable");
-    const backups = await listBackups();
-    if (backups.length === 0) throw new Error("no-backup");
+async function restoreCandidates(
+  names: string[],
+  backupBeforeRestore = true,
+): Promise<RestoreResult> {
+  if (!isTauri) throw new Error("fs unavailable");
+  if (names.length === 0) throw new Error("no-backup");
 
-    // 清掉可能残留的 pending（上次两阶段恢复已准备好但用户没重启，又重新发起恢复）
+  // 清掉可能残留的 pending（上次两阶段恢复已准备好但用户没重启，又重新发起恢复）
+  try {
+    await remove(`${(await dbFilePath())}${PENDING_RESTORE_SUFFIX}`);
+  } catch {
+    /* 无残留 */
+  }
+
+  const currentVersion = await currentSchemaVersion();
+  let chosen: { name: string; version: number } | null = null;
+  let lastError = "";
+  for (const name of names) {
     try {
-      await remove(`${(await dbFilePath())}${PENDING_RESTORE_SUFFIX}`);
-    } catch {
-      /* 无残留 */
-    }
-
-    const currentVersion = await currentSchemaVersion();
-    let chosen: { name: string; version: number } | null = null;
-    let lastError = "";
-    for (const backup of backups) {
-      try {
-        const version = await verifyBackupFile(backup.name);
-        if (version > currentVersion) {
-          lastError = "backup-from-newer-version";
-          continue;
-        }
-        chosen = { name: backup.name, version };
-        break;
-      } catch (e) {
-        lastError = e instanceof Error ? e.message : "backup-invalid";
+      const version = await verifyBackupFile(name);
+      if (version > currentVersion) {
+        lastError = "backup-from-newer-version";
+        continue;
       }
+      chosen = { name, version };
+      break;
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : "backup-invalid";
     }
-    if (!chosen) throw new Error(lastError || "backup-invalid");
+  }
+  if (!chosen) throw new Error(lastError || "backup-invalid");
 
+  if (backupBeforeRestore) {
     // 恢复前快照（当前数据），误恢复时可从备份目录的 prerestore-* 手动找回
     await createBackup(PRERESTORE_PREFIX);
     await cleanupPreRestoreBackups(1);
+  }
 
-    const dbPath = await dbFilePath();
-    if (chosen.version === currentVersion) {
-      await swapMainDbWithBackup(chosen.name);
-      location.reload();
-      return "reloaded";
-    }
+  const dbPath = await dbFilePath();
+  if (chosen.version === currentVersion) {
+    await swapMainDbWithBackup(chosen.name);
+    location.reload();
+    return "reloaded";
+  }
 
-    // 旧 schema：两阶段恢复，等新进程启动时换库并跑迁移
-    const dir = await backupDirPath();
-    const src = await join(dir, chosen.name);
-    const pendingPath = `${dbPath}${PENDING_RESTORE_SUFFIX}`;
-    try {
-      await remove(pendingPath);
-    } catch {
-      /* 覆盖旧 pending */
-    }
-    await copyFile(src, pendingPath);
-    return "restart-required";
-  });
+  // 旧 schema：两阶段恢复，等新进程启动时换库并跑迁移
+  const dir = await backupDirPath();
+  const src = await join(dir, chosen.name);
+  const pendingPath = `${dbPath}${PENDING_RESTORE_SUFFIX}`;
+  try {
+    await remove(pendingPath);
+  } catch {
+    /* 覆盖旧 pending */
+  }
+  await copyFile(src, pendingPath);
+  return "restart-required";
+}
+
+/** 用最新一份可用备份覆盖当前库（见 restoreCandidates 的版本语义） */
+export async function restoreLatestBackup(): Promise<RestoreResult> {
+  return withBackupLock(async () =>
+    restoreCandidates((await listBackups()).map((b) => b.name)),
+  );
+}
+
+/** 回退到最近一次"恢复前快照"（误恢复时的兜底入口） */
+export async function restorePreRestoreSnapshot(): Promise<RestoreResult> {
+  return withBackupLock(async () =>
+    restoreCandidates(
+      (await listPreRestoreSnapshots()).map((s) => s.name),
+      false,
+    ),
+  );
 }

@@ -1,10 +1,31 @@
 import { useEffect, useRef } from "react";
-import * as echarts from "echarts";
+import * as echarts from "echarts/core";
+import { BarChart, LineChart, PieChart } from "echarts/charts";
+import {
+  GraphicComponent,
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+} from "echarts/components";
+import { CanvasRenderer } from "echarts/renderers";
+import type { EChartsOption } from "echarts";
+
+// 按需注册，避免把整个 ECharts 打进包里（原全量 import 约 1MB+）
+echarts.use([
+  BarChart,
+  LineChart,
+  PieChart,
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+  GraphicComponent,
+  CanvasRenderer,
+]);
 
 type ChartEvents = Record<string, (params: unknown) => void>;
 
 interface ChartProps {
-  option: echarts.EChartsOption;
+  option: EChartsOption;
   className?: string;
   /** ECharts 事件回调（键集合须稳定，如 { click: fn }），handler 变化不重绑 */
   onEvents?: ChartEvents;

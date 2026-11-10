@@ -13,6 +13,25 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// ── Release 签名（可选）──────────────────────────────────────────────────────
+// `src-tauri/gen/android/keystore.properties`（已被 gen/android/.gitignore 覆盖，禁止入库）
+// 存在且四个字段齐全时，release 构建使用其中的签名；文件缺失时 release 保持未签名
+// （`tauri android build` 仍能产出未签名包，用于本机/CI 验证产物可编译）。
+// 文件格式（路径可为绝对路径，或相对 gen/android 目录）：
+//   storeFile=bunpocket-release.jks
+//   storePassword=******
+//   keyAlias=bunpocket
+//   keyPassword=******
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+val releaseSigningKeys = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+val hasReleaseSigning = keystorePropertiesFile.exists() &&
+    releaseSigningKeys.all { !keystoreProperties.getProperty(it).isNullOrBlank() }
+
 android {
     compileSdk = 36
     namespace = "com.bunpocket.app"
@@ -23,6 +42,16 @@ android {
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    if (hasReleaseSigning) {
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile")!!)
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -37,6 +66,10 @@ android {
             }
         }
         getByName("release") {
+            // 未提供 keystore.properties 时不指定 signingConfig，保持未签名
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

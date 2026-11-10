@@ -19,11 +19,11 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
-serde = { version = "1", features = ["derive"] }
+# tauri::generate_context! 展开代码会引用 serde_json，必须保留为直接依赖。
+# serde 本身当前无直接使用（tauri 内部自带依赖），已移除。
 serde_json = "1"
 
 

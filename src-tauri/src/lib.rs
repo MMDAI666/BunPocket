@@ -32,10 +32,15 @@ pub fn run() {
             sql: migration_sql(include_str!("../migrations/003_default_categories_v2.sql")),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "business integrity triggers",
+            sql: migration_sql(include_str!("../migrations/004_business_constraints.sql")),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(

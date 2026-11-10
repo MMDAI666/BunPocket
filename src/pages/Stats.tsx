@@ -1,12 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAppBack } from "../hooks/useAppBack";
 import { useTranslation } from "react-i18next";
-import * as echarts from "echarts";
-import type { BillKind, BillRow, Category } from "../db";
-import { billsInDateRange, loadCategoryRows } from "../db";
+import type { EChartsOption } from "echarts";
+import type { BillKind, BillRow, Category, DateRange } from "../db";
+import {
+  billsInDateRange,
+  budgetCycle,
+  getBudgets,
+  loadCategoryRows,
+} from "../db";
 import { buildCategoryTree, rollupByNode, rollupByTopLevel } from "../lib/category";
+import {
+  type BudgetRowMeta,
+  annotateBudgetRows,
+  budgetProgress,
+  categoryBudgetRows,
+  isOverBudget,
+} from "../lib/budget";
 import { cssColor, formatMoneyCompact } from "../lib/format";
 import { cn } from "../lib/cn";
+import { getSetting } from "../settings";
 import { Chart } from "../components/Chart";
 import { Segmented } from "../components/ui/Segmented";
 import { IconBadge } from "../components/ui/IconBadge";
@@ -44,6 +57,10 @@ export function Stats() {
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
+  const [budgetExec, setBudgetExec] = useState<{
+    rows: BudgetRowMeta[];
+    cycle: DateRange;
+  } | null>(null);
 
   const months = useMemo(() => {
     const list: { y: number; m: number }[] = [];
@@ -75,12 +92,29 @@ export function Stats() {
           from = `${year}-01-01`;
           to = `${year}-12-31`;
         }
-        const [bills, rows] = await Promise.all([
+        const day = Math.min(
+          Math.max(Number((await getSetting("billing_day")) ?? "1") || 1, 1),
+          28,
+        );
+        const cycle = budgetCycle(day);
+        const [bills, rows, cycleBills, budgets] = await Promise.all([
           billsInDateRange(from, to),
           loadCategoryRows(),
+          billsInDateRange(cycle.from, cycle.to),
+          getBudgets(),
         ]);
         if (!alive) return;
-        setData({ bills, roots: buildCategoryTree(rows) });
+        const roots = buildCategoryTree(rows);
+        const expenseRoots = roots.filter((cat) => cat.kind === "expense");
+        setData({ bills, roots });
+        setBudgetExec({
+          rows: annotateBudgetRows(
+            categoryBudgetRows(expenseRoots, budgets.byCategory, cycleBills),
+          )
+            .filter((row) => row.budget > 0)
+            .sort((a, b) => b.spent / b.budget - a.spent / a.budget),
+          cycle,
+        });
         setLoading(false);
       } catch {
         if (!alive) return;
@@ -135,17 +169,24 @@ export function Stats() {
       .sort((a, b) => b.cents - a.cents);
   }, [data, shareKind, drillPath]);
 
+  const otherCents = useMemo(
+    () => shares.slice(5).reduce((sum, s) => sum + s.cents, 0),
+    [shares],
+  );
+
   const dailyStats = useMemo(() => {
     if (mode !== "monthly") return null;
     const values = [...seriesByDay.values()];
     if (values.length === 0) return null;
     const total = values.reduce((s, v) => s + v, 0);
+    const daysInMonth = new Date(month.y, month.m, 0).getDate();
     return {
       max: Math.max(...values),
       min: Math.min(...values),
-      avg: Math.round(total / values.length),
+      // 自然日口径：总额 / 当月天数（不是"有记账的天数"）
+      avg: Math.round(total / daysInMonth),
     };
-  }, [seriesByDay, mode]);
+  }, [seriesByDay, mode, month]);
 
   const yearlyStats = useMemo(() => {
     if (mode !== "yearly") return null;
@@ -164,15 +205,18 @@ export function Stats() {
     };
   }, [monthlyTrend, mode, dailyKind]);
 
-  const ink3 = cssColor("--color-ink-3");
-  const lineColor = cssColor("--color-line");
-  const axisCommon = {
-    axisLine: { lineStyle: { color: lineColor } },
-    axisLabel: { color: ink3, fontSize: 10 },
-    splitLine: { lineStyle: { color: lineColor } },
-  };
+  const ink3 = useMemo(() => cssColor("--color-ink-3"), []);
+  const lineColor = useMemo(() => cssColor("--color-line"), []);
+  const axisCommon = useMemo(
+    () => ({
+      axisLine: { lineStyle: { color: lineColor } },
+      axisLabel: { color: ink3, fontSize: 10 },
+      splitLine: { lineStyle: { color: lineColor } },
+    }),
+    [ink3, lineColor],
+  );
 
-  const dailyOption = useMemo<echarts.EChartsOption>(() => {
+  const dailyOption = useMemo<EChartsOption>(() => {
     const daysInMonth = new Date(month.y, month.m, 0).getDate();
     const dayLabels: string[] = [];
     const values: number[] = [];
@@ -203,7 +247,12 @@ export function Stats() {
     };
   }, [month, seriesByDay, dailyKind, axisCommon]);
 
-  const trendOption = useMemo<echarts.EChartsOption>(() => {
+  const trendOption = useMemo<EChartsOption>(() => {
+    const kindName =
+      dailyKind === "expense" ? t("stats.expense") : t("stats.income");
+    const color = cssColor(
+      dailyKind === "expense" ? "--color-expense" : "--color-income",
+    );
     const monthLabels = Array.from({ length: 12 }, (_, i) => `${i + 1}`);
     return {
       grid: { left: 44, right: 8, top: 24, bottom: 24 },
@@ -215,32 +264,22 @@ export function Stats() {
         itemWidth: 10,
         itemHeight: 10,
         textStyle: { color: ink3, fontSize: 10 },
-        data: [t("stats.expense"), t("stats.income")],
+        data: [kindName],
       },
       series: [
         {
-          name: t("stats.expense"),
+          name: kindName,
           type: "line",
           smooth: true,
-          data: monthlyTrend.expense,
+          data: monthlyTrend[dailyKind],
           symbol: "circle",
           symbolSize: 5,
-          lineStyle: { width: 2, color: cssColor("--color-expense") },
-          itemStyle: { color: cssColor("--color-expense") },
-        },
-        {
-          name: t("stats.income"),
-          type: "line",
-          smooth: true,
-          data: monthlyTrend.income,
-          symbol: "circle",
-          symbolSize: 5,
-          lineStyle: { width: 2, color: cssColor("--color-income") },
-          itemStyle: { color: cssColor("--color-income") },
+          lineStyle: { width: 2, color },
+          itemStyle: { color },
         },
       ],
     };
-  }, [monthlyTrend, axisCommon, ink3, t]);
+  }, [monthlyTrend, axisCommon, ink3, t, dailyKind]);
 
   const totalKindCents = shares.reduce((s, x) => s + x.cents, 0);
   const catName = (c: Category) => (c.name_key ? t(c.name_key) : c.name);
@@ -250,8 +289,27 @@ export function Stats() {
     : shareKind === "expense"
       ? t("stats.totalExpense")
       : t("stats.totalIncome");
-  const donutOption = useMemo<echarts.EChartsOption>(() => {
+  const donutOption = useMemo<EChartsOption>(() => {
     const top = showAll ? shares : shares.slice(0, 5);
+    const data: {
+      name: string;
+      value: number;
+      catId?: number;
+      itemStyle: { color: string };
+    }[] = top.map((s, i) => ({
+      name: catName(s.cat),
+      value: s.cents / 100,
+      catId: s.cat.id,
+      itemStyle: { color: DONUT_PALETTE[i % DONUT_PALETTE.length] },
+    }));
+    // 折叠状态把第 6 名之后的分类合并成"其他"一片，保证扇区之和 = 中心总额
+    if (!showAll && otherCents > 0) {
+      data.push({
+        name: t("stats.other"),
+        value: otherCents / 100,
+        itemStyle: { color: "#9AA0A6" },
+      });
+    }
     return {
       tooltip: { valueFormatter: (v) => `¥${v}` },
       series: [
@@ -263,12 +321,7 @@ export function Stats() {
           animationDuration: 600,
           animationDurationUpdate: 300,
           animationType: "expansion",
-          data: top.map((s, i) => ({
-            name: catName(s.cat),
-            value: s.cents / 100,
-            catId: s.cat.id,
-            itemStyle: { color: DONUT_PALETTE[i % DONUT_PALETTE.length] },
-          })),
+          data,
         },
       ],
       graphic: [
@@ -287,7 +340,15 @@ export function Stats() {
         },
       ],
     };
-  }, [shares, showAll, totalKindCents, locale, centerLabel, t]);
+  }, [
+    shares,
+    showAll,
+    otherCents,
+    totalKindCents,
+    locale,
+    centerLabel,
+    t,
+  ]);
 
   /** 单击下钻：仅带未隐藏子分类的分类可下钻；下钻层的"本级"桶（自身）不可再进 */
   const drill = (cat: Category) => {
@@ -401,24 +462,72 @@ export function Stats() {
           </div>
         </div>
 
+        {budgetExec && budgetExec.rows.length > 0 && (
+          <section className="mt-3 rounded-2xl bg-card p-3">
+            <div className="flex items-center justify-between">
+              <CardTitle text={t("stats.budgetExecution")} />
+              <span className="text-[10px] text-ink-3">
+                {t("budget.cycleRange", {
+                  from: budgetExec.cycle.from,
+                  to: budgetExec.cycle.to,
+                })}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-col gap-2.5">
+              {budgetExec.rows.map((row) => (
+                <div key={row.cat.id}>
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="min-w-0 flex-1 truncate text-ink-2">
+                      {row.cat.name_key ? t(row.cat.name_key) : row.cat.name}
+                      {row.hasBudgetedDescendant && (
+                        <span className="ml-1 text-[10px] text-ink-3">
+                          {t("budget.includesChildren")}
+                        </span>
+                      )}
+                    </span>
+                    <span
+                      className={cn(
+                        "shrink-0",
+                        isOverBudget(row) ? "text-expense" : "text-ink-3",
+                      )}
+                    >
+                      {formatMoneyCompact(row.spent, locale)} / ¥
+                      {formatMoneyCompact(row.budget, locale)}
+                    </span>
+                  </div>
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-chip">
+                    <div
+                      className={cn(
+                        "h-full rounded-full",
+                        isOverBudget(row) ? "bg-expense" : "bg-brand",
+                      )}
+                      style={{
+                        width: `${Math.round(budgetProgress(row) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* 每日收支 / 月趋势 */}
         <section className="mt-3 rounded-2xl bg-card p-3">
           <div className="flex items-center justify-between">
             <CardTitle
               text={mode === "monthly" ? t("stats.dailyFlow") : t("stats.monthlyTrend")}
             />
-            {mode === "monthly" && (
-              <Segmented
-                size="sm"
-                block={false}
-                options={[
-                  { value: "expense", label: t("stats.expense") },
-                  { value: "income", label: t("stats.income") },
-                ]}
-                value={dailyKind}
-                onChange={setDailyKind}
-              />
-            )}
+            <Segmented
+              size="sm"
+              block={false}
+              options={[
+                { value: "expense", label: t("stats.expense") },
+                { value: "income", label: t("stats.income") },
+              ]}
+              value={dailyKind}
+              onChange={setDailyKind}
+            />
           </div>
           <div className="h-56">
             <Chart option={mode === "monthly" ? dailyOption : trendOption} />
@@ -500,9 +609,10 @@ export function Stats() {
               ) : (
                 <>
                   {legend.map((s, i) => (
-                    <div
+                    <button
                       key={s.cat.id}
-                      className="flex items-center rounded-lg py-1 active:bg-chip"
+                      type="button"
+                      className="flex w-full items-center rounded-lg py-1 text-left active:bg-chip"
                       onClick={() => drill(s.cat)}
                     >
                       <span
@@ -524,15 +634,35 @@ export function Stats() {
                             : "0%"}
                         </span>
                       </div>
-                    </div>
+                    </button>
                   ))}
+                  {!showAll && otherCents > 0 && (
+                    <div className="flex items-center py-1">
+                      <span className="h-2 w-2 shrink-0 rounded-full bg-ink-3" />
+                      <div className="ml-2 flex min-w-0 flex-1 items-center gap-2">
+                        <span className="min-w-0 flex-1 truncate text-xs text-ink">
+                          {t("stats.other")}
+                        </span>
+                        <span className={cn("text-xs", shareKind === "expense" ? "text-expense" : "text-income")}>
+                          {shareKind === "expense" ? "-" : "+"}
+                          {formatMoneyCompact(otherCents, locale)}
+                        </span>
+                        <span className="w-9 text-right text-[10px] text-ink-3">
+                          {totalKindCents > 0
+                            ? `${Math.round((otherCents / totalKindCents) * 100)}%`
+                            : "0%"}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   {shares.length > 5 && (
                     <button
                       type="button"
                       className="pt-1 text-xs text-brand"
                       onClick={() => setShowAll((v) => !v)}
                     >
-                      {showAll ? "﹀" : "›"} {t("stats.viewAll")}
+                      {showAll ? "﹀" : "›"}{" "}
+                      {showAll ? t("stats.collapse") : t("stats.viewAll")}
                     </button>
                   )}
                 </>
@@ -577,3 +707,4 @@ function StatItem({
     </div>
   );
 }
+

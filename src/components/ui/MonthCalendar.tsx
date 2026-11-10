@@ -73,7 +73,7 @@ export function MonthCalendar({ value, onChange, locale }: MonthCalendarProps) {
           type="button"
           className="flex h-8 w-8 items-center justify-center rounded-full text-ink-2 active:bg-chip"
           onClick={() => shiftMonth(-1)}
-          aria-label="previous month"
+          aria-label={t("common.prevMonth")}
         >
           ‹
         </button>
@@ -93,7 +93,7 @@ export function MonthCalendar({ value, onChange, locale }: MonthCalendarProps) {
           type="button"
           className="flex h-8 w-8 items-center justify-center rounded-full text-ink-2 active:bg-chip"
           onClick={() => shiftMonth(1)}
-          aria-label="next month"
+          aria-label={t("common.nextMonth")}
         >
           ›
         </button>

@@ -5,13 +5,15 @@
     "save": "Save",
     "delete": "Delete",
     "edit": "Edit",
-    "done": "Done",
     "back": "Back",
     "confirmDeleteTitle": "Delete?",
     "saveFailed": "Save failed",
     "deleteFailed": "Delete failed",
+    "prevMonth": "Previous month",
+    "nextMonth": "Next month",
     "loadFailed": "Failed to load, please retry",
     "retry": "Retry",
+    "loadMore": "Load more",
     "invalidAmount": "Invalid amount or over the limit",
     "appCrashed": "Something went wrong",
     "appCrashedHint": "Reload the app. If this keeps happening, data loading may be failing.",
@@ -20,7 +22,6 @@
     "empty": "No data yet"
   },
   "nav": {
-    "home": "Home",
     "add": "Add Bill",
     "stats": "Stats",
     "settings": "Settings"
@@ -34,6 +35,7 @@
     "budgetDaysLeft": "Days to Reset",
     "budgetDaysUnit": "d",
     "recentBills": "Recent Bills",
+    "categoryBudget": "Category Budgets",
     "viewAll": "View All",
     "setBudget": "Set now",
     "dayExpense": "Expense"
@@ -43,10 +45,10 @@
     "income": "Income",
     "amountPlaceholder": "Enter amount",
     "notePlaceholder": "Add note",
-    "noAccount": "No account",
     "excludeBudget": "Exclude from budget",
     "dateToday": "Today",
     "pickDate": "Pick date",
+    "pickTime": "Pick time",
     "another": "Next",
     "saved": "Saved",
     "savedAndNew": "Saved, next one",
@@ -70,7 +72,10 @@
     "minMonth": "Min Month",
     "monthlyAvg": "Monthly Avg",
     "viewAll": "View All",
+    "collapse": "Collapse",
     "all": "All",
+    "budgetExecution": "Budget Execution",
+    "other": "Other",
     "calendarMonths": "Months are calendar months"
   },
   "settings": {
@@ -78,14 +83,14 @@
     "categoryManage": "Categories",
     "budget": "Budget",
     "appearance": "Appearance",
-    "theme": "Dark Mode",
+    "theme": "Theme",
     "themeAuto": "System",
     "themeLight": "Light",
     "themeDark": "Dark",
     "language": "Language",
     "languageAuto": "System",
     "dataBackup": "Data Backup",
-    "about": "About BunPocket"
+    "version": "Version"
   },
   "backup": {
     "lastTime": "Last Backup",
@@ -94,6 +99,9 @@
     "countUnit": "backups",
     "now": "Back Up Now",
     "restore": "Restore Latest Backup",
+    "preRestore": "Pre-restore Snapshot",
+    "preRestoreTitle": "Pre-restore Snapshot",
+    "preRestoreContent": "Replace current data with the latest automatic pre-restore snapshot (to undo a bad restore)",
     "restoreTitle": "Confirm Restore",
     "restoreContent": "The latest backup will replace current data; a snapshot of current data is saved first",
     "versionMismatch": "Backup version does not match this app; restore is not supported",
@@ -102,7 +110,8 @@
     "integrityFailed": "Backup file check failed; restore cancelled",
     "done": "Backup created",
     "failed": "Operation failed",
-    "noBackup": "No backup yet"
+    "noBackup": "No backup yet",
+    "none": "None"
   },
   "categories": {
     "title": "Categories",
@@ -116,9 +125,9 @@
     "hasChildren": "Delete subcategories first",
     "hasBills": "Bills exist under this category",
     "systemCategory": "Built-in",
-    "pickEmoji": "Pick Icon",
     "pickFromGallery": "From Gallery",
-    "resetIcon": "Reset to Default Icon"
+    "resetIcon": "Reset to Default Icon",
+    "more": "More"
   },
   "budget": {
     "title": "Budget",
@@ -127,10 +136,15 @@
     "billingDay": "Billing Day",
     "byCategory": "Category Budgets",
     "none": "Not set",
+    "overBudget": "Over budget",
+    "used": "Used",
+    "includesChildren": "incl. subcategories",
+    "childSumHint": "Subcategory budgets exceed this category budget",
+    "cycleRange": "{{from}} ~ {{to}}",
+    "categorySumHint": "Category budgets exceed the total budget",
     "amountPlaceholder": "Enter amount"
   },
   "bills": {
-    "title": "All Bills",
     "searchPlaceholder": "Search notes or categories",
     "deleteBillTitle": "Delete this bill?",
     "deleteBillContent": "This cannot be undone"

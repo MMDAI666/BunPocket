@@ -30,11 +30,6 @@ export function categoryPath(
   return [];
 }
 
-/** 该节点及其整棵子树的所有 id */
-export function subtreeIds(cat: Category): number[] {
-  return [cat.id, ...cat.children.flatMap(subtreeIds)];
-}
-
 /** 从树里按 id 找节点 */
 export function findCategory(roots: Category[], id: number): Category | null {
   for (const root of roots) {
@@ -45,15 +40,17 @@ export function findCategory(roots: Category[], id: number): Category | null {
   return null;
 }
 
-/** 一级祖先（顶级分类）id */
-export function topLevelAncestor(path: Category[]): number | null {
-  return path.length > 0 ? path[0].id : null;
-}
-
-export interface CategorySum {
-  categoryId: number;
-  kind: BillKind;
-  cents: number;
+/** 按先序展开分类树，附带层级深度（Budget 列表 / 搜索匹配用） */
+export function flattenCategoryTree(
+  roots: Category[],
+  depth = 0,
+): { cat: Category; depth: number }[] {
+  const out: { cat: Category; depth: number }[] = [];
+  for (const cat of roots) {
+    out.push({ cat, depth });
+    out.push(...flattenCategoryTree(cat.children, depth + 1));
+  }
+  return out;
 }
 
 /**
@@ -82,20 +79,6 @@ export function rollupByTopLevel(
     sums.set(top, (sums.get(top) ?? 0) + bill.amount_cents);
   }
   return sums;
-}
-
-/** 周期内支出总额（可排除不计入预算的账单） */
-export function sumExpense(
-  bills: BillRow[],
-  includeExcludedFromBudget: boolean,
-): number {
-  let total = 0;
-  for (const bill of bills) {
-    if (bill.kind !== "expense") continue;
-    if (!includeExcludedFromBudget && bill.exclude_budget) continue;
-    total += bill.amount_cents;
-  }
-  return total;
 }
 
 export interface NodeShare {

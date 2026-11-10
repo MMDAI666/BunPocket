@@ -213,13 +213,68 @@ export async function billsInDateRange(
   );
 }
 
-export async function searchBills(keyword: string): Promise<BillRow[]> {
+/** 分页版流水（Bills 页"加载更多"用） */
+export async function billsInDateRangePaged(
+  dateFrom: string,
+  dateTo: string,
+  limit: number,
+  offset: number,
+): Promise<BillRow[]> {
   const database = await getDb();
   return database.select<BillRow[]>(
+    `SELECT * FROM bill WHERE date >= $1 AND date <= $2
+     ORDER BY date DESC, time DESC, id DESC LIMIT $3 OFFSET $4`,
+    [dateFrom, dateTo, limit, offset],
+  );
+}
+
+/** 某区间内按日的支出合计（Home 日头展示用，避免用最近 N 条账单近似） */
+export async function dailyExpenseTotals(
+  dateFrom: string,
+  dateTo: string,
+): Promise<{ date: string; total: number }[]> {
+  const database = await getDb();
+  return database.select<{ date: string; total: number }[]>(
+    `SELECT date, SUM(amount_cents) AS total FROM bill
+     WHERE kind = 'expense' AND date >= $1 AND date <= $2
+     GROUP BY date`,
+    [dateFrom, dateTo],
+  );
+}
+
+/** LIKE 通配符转义（配合 ESCAPE '\' 使用） */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/**
+ * 搜索账单：备注 / 分类存储名 / 当前语言下的分类显示名（由调用方先把
+ * 显示名命中的分类 id 传进来）。keyword 中的 %/_/\ 会被转义，避免通配符污染。
+ */
+export async function searchBills(
+  keyword: string,
+  matchedCategoryIds: number[] = [],
+  limit = 50,
+  offset = 0,
+): Promise<BillRow[]> {
+  const database = await getDb();
+  const like = `%${escapeLike(keyword)}%`;
+  const params: unknown[] = [like];
+  let categoryClause = "";
+  if (matchedCategoryIds.length > 0) {
+    const placeholders = matchedCategoryIds.map((id) => {
+      params.push(id);
+      return `$${params.length}`;
+    });
+    categoryClause = ` OR b.category_id IN (${placeholders.join(", ")})`;
+  }
+  params.push(limit, offset);
+  return database.select<BillRow[]>(
     `SELECT b.* FROM bill b JOIN category c ON c.id = b.category_id
-     WHERE b.note LIKE $1 OR c.name LIKE $1
-     ORDER BY b.date DESC, b.time DESC, b.id DESC LIMIT 200`,
-    [`%${keyword}%`],
+     WHERE b.note LIKE $1 ESCAPE '\\' OR c.name LIKE $1 ESCAPE '\\'${categoryClause}
+     ORDER BY b.date DESC, b.time DESC, b.id DESC
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params,
   );
 }
 

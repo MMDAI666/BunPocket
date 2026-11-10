@@ -5,7 +5,6 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "opener:default",
     "sql:default",
     "sql:allow-execute",
     "deep-link:default",
@@ -15,7 +14,17 @@
     "fs:allow-remove",
     {
       "identifier": "fs:scope",
-      "allow": ["$APPCONFIG/**"]
+      "allow": [
+        "$APPCONFIG/backups",
+        "$APPCONFIG/backups/**",
+        "$APPCONFIG/bunpocket.db",
+        "$APPCONFIG/bunpocket.db.old",
+        "$APPCONFIG/bunpocket.db-restore-tmp",
+        "$APPCONFIG/bunpocket.db.pending-restore",
+        "$APPCONFIG/bunpocket.db-journal",
+        "$APPCONFIG/bunpocket.db-wal",
+        "$APPCONFIG/bunpocket.db-shm"
+      ]
     }
   ]
 }

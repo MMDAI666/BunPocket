@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { getVersion } from "@tauri-apps/api/app";
+import { Info, Tags, Wallet } from "lucide-react";
 import { Segmented } from "../components/ui/Segmented";
 import { Sheet } from "../components/ui/Sheet";
 import { Confirm } from "../components/ui/Confirm";
@@ -14,8 +16,11 @@ import {
   backupNow,
   getKeepCount,
   listBackups,
+  listPreRestoreSnapshots,
   restoreLatestBackup,
+  restorePreRestoreSnapshot,
   setKeepCount,
+  type RestoreResult,
 } from "../lib/backup";
 import { cn } from "../lib/cn";
 
@@ -33,7 +38,10 @@ export function Settings() {
   const [keepDraft, setKeepDraft] = useState(1);
   const [lastBackup, setLastBackup] = useState<Date | null>(null);
   const [hasBackup, setHasBackup] = useState(false);
+  const [preRestoreCount, setPreRestoreCount] = useState(0);
   const [confirmRestore, setConfirmRestore] = useState(false);
+  const [confirmPreRestore, setConfirmPreRestore] = useState(false);
+  const [version, setVersion] = useState<string | null>(null);
   /** 备份/恢复是 IO 重操作（恢复还会换库文件）：全程加锁防重复触发 */
   const [backupBusy, setBackupBusy] = useState(false);
 
@@ -43,6 +51,7 @@ export function Settings() {
       const backups = await listBackups();
       setLastBackup(backups[0]?.date ?? null);
       setHasBackup(backups.length > 0);
+      setPreRestoreCount((await listPreRestoreSnapshots()).length);
     } catch {
       /* 浏览器环境 */
     }
@@ -50,6 +59,11 @@ export function Settings() {
 
   useEffect(() => {
     void refreshBackupInfo();
+    void getVersion()
+      .then((v) => setVersion(v))
+      .catch(() => {
+        /* 浏览器 dev 环境没有 Tauri app API */
+      });
   }, []);
 
   const formatTime = (d: Date) =>
@@ -57,6 +71,34 @@ export function Settings() {
       dateStyle: "short",
       timeStyle: "medium",
     }).format(d);
+
+  const runRestore = (restore: () => Promise<RestoreResult>) => {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    void restore()
+      .then((result) => {
+        if (result === "restart-required") {
+          toast.show(t("backup.restartRequired"));
+        }
+      })
+      .catch((err: unknown) => {
+        const code = err instanceof Error ? err.message : "";
+        if (code === "backup-from-newer-version") {
+          toast.show(t("backup.tooNew"), "error");
+        } else if (code === "backup-version-mismatch") {
+          toast.show(t("backup.versionMismatch"), "error");
+        } else if (code === "backup-integrity" || code === "backup-invalid") {
+          toast.show(t("backup.integrityFailed"), "error");
+        } else {
+          toast.show(t("backup.failed"), "error");
+        }
+      })
+      .finally(() => {
+        // 恢复流程可能已生成新的恢复前快照（restart-required/失败时），刷新计数让入口可用
+        void refreshBackupInfo();
+        setBackupBusy(false);
+      });
+  };
 
   return (
     <div className="flex h-full flex-col bg-page">
@@ -90,7 +132,9 @@ export function Settings() {
             value={theme}
             onChange={(v) => void setTheme(v)}
           />
-          <div className="pt-3 pb-2 text-sm text-ink-2">{t("settings.language")}</div>
+          <div className="pt-3 pb-2 text-sm text-ink-2">
+            {t("settings.language")}
+          </div>
           <Segmented<LocaleSetting>
             options={[
               { value: "auto", label: t("settings.languageAuto") },
@@ -107,11 +151,13 @@ export function Settings() {
         </h2>
         <div className="divide-y divide-gray-100 rounded-2xl bg-card dark:divide-white/5">
           <SettingsRow
-            label={`🏷 ${t("settings.categoryManage")}`}
+            icon={<Tags size={16} className="text-ink-3" />}
+            label={t("settings.categoryManage")}
             onClick={() => navigate("/categories")}
           />
           <SettingsRow
-            label={`💰 ${t("settings.budget")}`}
+            icon={<Wallet size={16} className="text-ink-3" />}
+            label={t("settings.budget")}
             onClick={() => navigate("/budget")}
           />
         </div>
@@ -160,11 +206,24 @@ export function Settings() {
             value={hasBackup ? undefined : t("backup.noBackup")}
             onClick={() => setConfirmRestore(true)}
           />
+          <SettingsRow
+            label={t("backup.preRestore")}
+            disabled={preRestoreCount === 0 || backupBusy}
+            value={
+              preRestoreCount > 0
+                ? `${preRestoreCount}`
+                : t("backup.none")
+            }
+            onClick={() => setConfirmPreRestore(true)}
+          />
         </div>
 
-        <h2 className="px-1 pt-4 pb-2 text-sm font-bold text-ink"> </h2>
-        <div className="rounded-2xl bg-card">
-          <SettingsRow label={`🐰 ${t("settings.about")}`} onClick={() => undefined} />
+        <div className="mt-4 flex items-center gap-2 rounded-2xl bg-card px-4 py-3.5">
+          <Info size={16} className="text-ink-3" />
+          <span className="flex-1 text-[15px] text-ink">
+            {t("settings.version")}
+          </span>
+          <span className="text-sm text-ink-3">{version ?? "—"}</span>
         </div>
       </div>
 
@@ -174,7 +233,12 @@ export function Settings() {
         onOpenChange={setKeepSheet}
         title={t("backup.keepCount")}
       >
-        <Wheel items={KEEP_RANGE} value={keepDraft} onChange={setKeepDraft} />
+        <Wheel
+          items={KEEP_RANGE}
+          value={keepDraft}
+          onChange={setKeepDraft}
+          ariaLabel={t("backup.keepCount")}
+        />
         <button
           type="button"
           className="mt-2 w-full rounded-full bg-gradient-to-r from-brand-1 to-brand-2 py-2.5 text-sm font-medium text-white"
@@ -195,43 +259,29 @@ export function Settings() {
         title={t("backup.restoreTitle")}
         content={t("backup.restoreContent")}
         danger
-        onConfirm={() => {
-          if (backupBusy) return;
-          setBackupBusy(true);
-          void restoreLatestBackup()
-            .then((result) => {
-              if (result === "restart-required") {
-                toast.show(t("backup.restartRequired"));
-              }
-            })
-            .catch((err: unknown) => {
-              const code = err instanceof Error ? err.message : "";
-              if (code === "backup-from-newer-version") {
-                toast.show(t("backup.tooNew"), "error");
-              } else if (code === "backup-version-mismatch") {
-                toast.show(t("backup.versionMismatch"), "error");
-              } else if (
-                code === "backup-integrity" ||
-                code === "backup-invalid"
-              ) {
-                toast.show(t("backup.integrityFailed"), "error");
-              } else {
-                toast.show(t("backup.failed"), "error");
-              }
-            })
-            .finally(() => setBackupBusy(false));
-        }}
+        onConfirm={() => runRestore(restoreLatestBackup)}
+      />
+
+      <Confirm
+        open={confirmPreRestore}
+        onOpenChange={setConfirmPreRestore}
+        title={t("backup.preRestoreTitle")}
+        content={t("backup.preRestoreContent")}
+        danger
+        onConfirm={() => runRestore(restorePreRestoreSnapshot)}
       />
     </div>
   );
 }
 
 function SettingsRow({
+  icon,
   label,
   value,
   disabled = false,
   onClick,
 }: {
+  icon?: ReactNode;
   label: string;
   value?: string;
   disabled?: boolean;
@@ -247,6 +297,7 @@ function SettingsRow({
       )}
       onClick={onClick}
     >
+      {icon != null && <span className="mr-2">{icon}</span>}
       <span className={cn("flex-1", disabled ? "text-ink-3" : "text-ink")}>
         {label}
       </span>

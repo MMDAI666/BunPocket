@@ -5,13 +5,15 @@
     "save": "保存",
     "delete": "删除",
     "edit": "编辑",
-    "done": "完成",
     "back": "返回",
     "confirmDeleteTitle": "确认删除？",
     "saveFailed": "保存失败",
     "deleteFailed": "删除失败",
+    "prevMonth": "上个月",
+    "nextMonth": "下个月",
     "loadFailed": "加载失败，请重试",
     "retry": "重试",
+    "loadMore": "加载更多",
     "invalidAmount": "金额无效或超出上限",
     "appCrashed": "页面出错了",
     "appCrashedHint": "请重新加载应用；若反复出现，可能是数据读取失败",
@@ -20,7 +22,6 @@
     "empty": "暂无数据"
   },
   "nav": {
-    "home": "首页",
     "add": "记一笔",
     "stats": "统计",
     "settings": "设置"
@@ -34,6 +35,7 @@
     "budgetDaysLeft": "距结算日",
     "budgetDaysUnit": "天",
     "recentBills": "最近记录",
+    "categoryBudget": "分类预算",
     "viewAll": "查看全部",
     "setBudget": "去设置",
     "dayExpense": "支出"
@@ -43,10 +45,10 @@
     "income": "收入",
     "amountPlaceholder": "输入金额",
     "notePlaceholder": "输入备注",
-    "noAccount": "不选择账户",
     "excludeBudget": "不计入预算",
     "dateToday": "今天",
     "pickDate": "选择日期",
+    "pickTime": "选择时间",
     "another": "再记",
     "saved": "已保存",
     "savedAndNew": "已保存，继续记",
@@ -63,14 +65,17 @@
     "categoryShare": "收支占比",
     "totalExpense": "总支出",
     "totalIncome": "总收入",
-    "maxDay": "最高日支出",
-    "minDay": "最低日支出",
-    "dailyAvg": "日均支出",
-    "maxMonth": "最高月支出",
-    "minMonth": "最低月支出",
-    "monthlyAvg": "月均支出",
+    "maxDay": "最高日",
+    "minDay": "最低日",
+    "dailyAvg": "日均",
+    "maxMonth": "最高月",
+    "minMonth": "最低月",
+    "monthlyAvg": "月均",
     "viewAll": "查看全部",
+    "collapse": "收起",
     "all": "全部",
+    "budgetExecution": "预算执行",
+    "other": "其他",
     "calendarMonths": "注：月份为自然月"
   },
   "settings": {
@@ -78,14 +83,14 @@
     "categoryManage": "分类管理",
     "budget": "预算设置",
     "appearance": "外观",
-    "theme": "深色模式",
+    "theme": "主题",
     "themeAuto": "跟随系统",
     "themeLight": "浅色",
     "themeDark": "深色",
     "language": "语言",
     "languageAuto": "跟随系统",
     "dataBackup": "数据备份",
-    "about": "关于 BunPocket"
+    "version": "版本"
   },
   "backup": {
     "lastTime": "最近备份",
@@ -94,6 +99,9 @@
     "countUnit": "份",
     "now": "立即备份",
     "restore": "恢复最近备份",
+    "preRestore": "恢复前快照",
+    "preRestoreTitle": "恢复前快照",
+    "preRestoreContent": "将用最近一次恢复前自动保存的快照覆盖当前数据（用于撤销误恢复）",
     "restoreTitle": "恢复确认",
     "restoreContent": "将用最近备份覆盖当前数据；恢复前会自动保存一份当前数据快照",
     "versionMismatch": "备份版本与当前应用不一致，暂不支持恢复",
@@ -102,7 +110,8 @@
     "integrityFailed": "备份文件校验失败，已取消恢复",
     "done": "已备份",
     "failed": "操作失败",
-    "noBackup": "暂无备份"
+    "noBackup": "暂无备份",
+    "none": "无"
   },
   "categories": {
     "title": "分类管理",
@@ -116,9 +125,9 @@
     "hasChildren": "请先删除子分类",
     "hasBills": "该分类下有账单",
     "systemCategory": "预置",
-    "pickEmoji": "选择图标",
     "pickFromGallery": "从相册选择",
-    "resetIcon": "恢复默认图标"
+    "resetIcon": "恢复默认图标",
+    "more": "更多操作"
   },
   "budget": {
     "title": "预算设置",
@@ -127,10 +136,15 @@
     "billingDay": "结算日",
     "byCategory": "分类预算",
     "none": "未设置",
+    "overBudget": "已超支",
+    "used": "已用",
+    "includesChildren": "含子分类",
+    "childSumHint": "子分类预算合计超过本分类预算",
+    "cycleRange": "{{from}} ~ {{to}}",
+    "categorySumHint": "分类预算合计已超过总预算",
     "amountPlaceholder": "输入金额"
   },
   "bills": {
-    "title": "全部账单",
     "searchPlaceholder": "搜索备注或分类",
     "deleteBillTitle": "删除这笔账单？",
     "deleteBillContent": "删除后不可恢复"

@@ -1,20 +1,32 @@
 import {
   Apple,
+  Bike,
   BookOpen,
   Briefcase,
+  Bus,
   Candy,
+  CarTaxiFront,
+  Dices,
+  Droplets,
+  Flame,
+  Fuel,
   Gamepad2,
   Gift,
+  HandCoins,
   House,
   Package,
   PartyPopper,
   Phone,
   Pill,
+  PlugZap,
+  ScrollText,
   ShieldCheck,
   Shirt,
+  ShowerHead,
   ShoppingBag,
   Smartphone,
   TrainFront,
+  TramFront,
   TrendingUp,
   Undo2,
   Utensils,
@@ -23,7 +35,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-/** 系统分类（name_key）→ 图标库映射；自定义分类不在此表，走 emoji/图片 */
+/**
+ * 系统分类（name_key）→ 图标库映射。
+ * `icon_type=auto` 时系统分类优先使用这里的 SVG；自定义分类/未映射 key 仍回退 emoji。
+ */
 const CATEGORY_ICONS: Record<string, LucideIcon> = {
   "category.food": Utensils,
   "category.transport": TrainFront,
@@ -47,6 +62,25 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
   "category.partTime": Wrench,
   "category.giftIn": Gift,
   "category.refund": Undo2,
+  // 003 默认分类 v2 新增
+  "category.subsidy": HandCoins,
+  "category.utilitiesWater": Droplets,
+  "category.utilitiesPower": PlugZap,
+  "category.utilitiesGas": Flame,
+  "category.entMahjong": Dices,
+  "category.entGame": Gamepad2,
+  "category.entGeneral": PartyPopper,
+  "category.transportMetro": TramFront,
+  "category.transportHsr": TrainFront,
+  "category.transportBus": Bus,
+  "category.transportFuel": Fuel,
+  "category.transportTaxi": CarTaxiFront,
+  "category.foodSnacks": Candy,
+  "category.foodFruit": Apple,
+  "category.foodTakeout": Bike,
+  "category.dailyBath": ShowerHead,
+  "category.dailyPaper": ScrollText,
+  "category.dailyOther": Package,
 };
 
 /** 按系统分类 name_key 查图标库图标，查不到返回 null */

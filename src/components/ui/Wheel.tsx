@@ -1,7 +1,6 @@
 import {
   useEffect,
   useRef,
-  useState,
   type ReactNode,
 } from "react";
 import { cn } from "../../lib/cn";
@@ -13,6 +12,7 @@ interface WheelProps<T extends string | number> {
   render?: (item: T, selected: boolean) => ReactNode;
   itemHeight?: number;
   visibleCount?: number;
+  ariaLabel?: string;
 }
 
 /**
@@ -26,16 +26,12 @@ export function Wheel<T extends string | number>({
   render,
   itemHeight = 40,
   visibleCount = 5,
+  ariaLabel,
 }: WheelProps<T>) {
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const [displayIndex, setDisplayIndex] = useState(() =>
-    Math.max(items.indexOf(value), 0),
-  );
-
   const height = itemHeight * visibleCount;
   const pad = (height - itemHeight) / 2;
-  const valueIndex = Math.max(items.indexOf(value), 0);
-  if (valueIndex !== displayIndex) setDisplayIndex(valueIndex);
+  const selectedIndex = Math.max(items.indexOf(value), 0);
 
   useEffect(() => {
     const el = scrollerRef.current;
@@ -48,7 +44,6 @@ export function Wheel<T extends string | number>({
           Math.max(Math.round(el.scrollTop / itemHeight), 0),
           items.length - 1,
         );
-        setDisplayIndex(idx);
         const next = items[idx];
         if (next !== value) onChange(next);
       }, 80);
@@ -63,11 +58,11 @@ export function Wheel<T extends string | number>({
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
-    const target = valueIndex * itemHeight;
+    const target = selectedIndex * itemHeight;
     if (Math.abs(el.scrollTop - target) >= 1) {
       el.scrollTo({ top: target, behavior: "auto" });
     }
-  }, [valueIndex, itemHeight]);
+  }, [selectedIndex, itemHeight]);
 
   return (
     <div className="relative" style={{ height }}>
@@ -79,20 +74,24 @@ export function Wheel<T extends string | number>({
         ref={scrollerRef}
         className="wheel-fade h-full overflow-y-auto"
         style={{ scrollSnapType: "y mandatory" }}
+        role="listbox"
+        aria-label={ariaLabel}
       >
         <div style={{ height: pad }} />
         {items.map((item, i) => (
           <div
             key={item}
+            role="option"
+            aria-selected={i === selectedIndex}
             className={cn(
               "flex items-center justify-center transition-colors",
-              i === displayIndex
+              i === selectedIndex
                 ? "text-base font-semibold text-ink"
                 : "text-ink-3",
             )}
             style={{ height: itemHeight, scrollSnapAlign: "center" }}
           >
-            {render ? render(item, i === displayIndex) : item}
+            {render ? render(item, i === selectedIndex) : item}
           </div>
         ))}
         <div style={{ height: pad }} />

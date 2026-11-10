@@ -20,6 +20,7 @@ open class BuildTask : DefaultTask() {
         try {
             runTauriCli(executable)
         } catch (e: Exception) {
+            var lastException: Exception = e
             if (Os.isFamily(Os.FAMILY_WINDOWS)) {
                 // Try different Windows-specific extensions
                 val fallbacks = listOf(
@@ -27,8 +28,6 @@ open class BuildTask : DefaultTask() {
                     "$executable.cmd",
                     "$executable.bat",
                 )
-                
-                var lastException: Exception = e
                 for (fallback in fallbacks) {
                     try {
                         runTauriCli(fallback)
@@ -37,18 +36,25 @@ open class BuildTask : DefaultTask() {
                         lastException = fallbackException
                     }
                 }
-                throw lastException
-            } else {
-                throw e;
             }
+            // 兜底：pnpm 不在 PATH 但 Node 自带 corepack 时，改走 `corepack pnpm ...`
+            // （未执行过 `corepack enable` 的机器上 Gradle 找不到 pnpm 命令）。
+            // 只有上面所有 pnpm 尝试都失败后才走到这里，不改变 pnpm 优先行为。
+            try {
+                runTauriCli("corepack", listOf("pnpm"))
+                return
+            } catch (fallbackException: Exception) {
+                lastException = fallbackException
+            }
+            throw lastException
         }
     }
 
-    fun runTauriCli(executable: String) {
+    fun runTauriCli(executable: String, prefixArgs: List<String> = emptyList()) {
         val rootDirRel = rootDirRel ?: throw GradleException("rootDirRel cannot be null")
         val target = target ?: throw GradleException("target cannot be null")
         val release = release ?: throw GradleException("release cannot be null")
-        val args = listOf("tauri", "android", "android-studio-script");
+        val args = prefixArgs + listOf("tauri", "android", "android-studio-script");
 
         project.exec {
             workingDir(File(project.projectDir, rootDirRel))

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import {
   HashRouter,
   Navigate,
@@ -9,12 +9,26 @@ import {
 } from "react-router-dom";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { Home } from "./pages/Home";
-import { AddBill } from "./pages/AddBill";
-import { Bills } from "./pages/Bills";
-import { Stats } from "./pages/Stats";
-import { Settings } from "./pages/Settings";
-import { Categories } from "./pages/Categories";
-import { Budget } from "./pages/Budget";
+
+// 首屏只保留首页；其余页面按路由懒加载，避免 ECharts 等重依赖进入首包
+const AddBill = lazy(() =>
+  import("./pages/AddBill").then((m) => ({ default: m.AddBill })),
+);
+const Bills = lazy(() =>
+  import("./pages/Bills").then((m) => ({ default: m.Bills })),
+);
+const Stats = lazy(() =>
+  import("./pages/Stats").then((m) => ({ default: m.Stats })),
+);
+const Settings = lazy(() =>
+  import("./pages/Settings").then((m) => ({ default: m.Settings })),
+);
+const Categories = lazy(() =>
+  import("./pages/Categories").then((m) => ({ default: m.Categories })),
+);
+const Budget = lazy(() =>
+  import("./pages/Budget").then((m) => ({ default: m.Budget })),
+);
 
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -88,16 +102,18 @@ function AnimatedRoutes() {
   useDeepLinkNavigate(navigate);
   return (
     <div key={location.pathname} className="page-in h-full">
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/add" element={<AddBill />} />
-        <Route path="/bills" element={<Bills />} />
-        <Route path="/stats" element={<Stats />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/categories" element={<Categories />} />
-        <Route path="/budget" element={<Budget />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Suspense fallback={<div className="h-full bg-page" />}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/add" element={<AddBill />} />
+          <Route path="/bills" element={<Bills />} />
+          <Route path="/stats" element={<Stats />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/categories" element={<Categories />} />
+          <Route path="/budget" element={<Budget />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </div>
   );
 }

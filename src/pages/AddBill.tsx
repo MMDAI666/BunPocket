@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAppBack } from "../hooks/useAppBack";
 import { useTranslation } from "react-i18next";
+import { Trash2 } from "lucide-react";
 import {
   type BillKind,
   type Category,
@@ -9,6 +10,7 @@ import {
   getBill,
   insertBill,
   loadCategoryRows,
+  recentNotes,
   updateBill,
 } from "../db";
 import { buildCategoryTree, categoryPath } from "../lib/category";
@@ -42,6 +44,7 @@ export function AddBill() {
   const [note, setNote] = useState("");
   const [excludeBudget, setExcludeBudget] = useState(false);
   const [expr, setExpr] = useState("");
+  const [noteSuggestions, setNoteSuggestions] = useState<string[]>([]);
 
   const [dateOpen, setDateOpen] = useState(false);
   const [timeOpen, setTimeOpen] = useState(false);
@@ -59,6 +62,13 @@ export function AddBill() {
         if (!alive) return;
         const tree = buildCategoryTree(rows);
         setRoots(tree);
+        void recentNotes(8)
+          .then((notes) => {
+            if (alive) setNoteSuggestions(notes);
+          })
+          .catch(() => {
+            /* 备注历史只是增强，失败静默 */
+          });
         if (editId) {
           const bill = await getBill(editId);
           if (!alive) return;
@@ -196,7 +206,7 @@ export function AddBill() {
             onClick={() => setConfirmDelete(true)}
             aria-label={t("common.delete")}
           >
-            🗑
+            <Trash2 size={20} />
           </button>
         ) : (
           <div className="w-10" />
@@ -320,6 +330,7 @@ export function AddBill() {
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder={t("add.notePlaceholder")}
+          aria-label={t("add.notePlaceholder")}
           className="min-w-0 flex-1 rounded-full border border-line px-3 py-1.5 text-xs text-ink outline-none placeholder:text-ink-3 focus:border-brand"
         />
         <button
@@ -335,6 +346,23 @@ export function AddBill() {
           {t("add.excludeBudget")}
         </button>
       </div>
+
+      {/* 备注历史（备注为空时给出最近用过的备注；onMouseDown 阻止点击瞬间失焦带来的移动端/桌面端行为差异） */}
+      {note === "" && noteSuggestions.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 px-4 pb-1">
+          {noteSuggestions.map((suggestion) => (
+            <button
+              key={suggestion}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              className="max-w-full truncate rounded-full bg-chip px-2.5 py-1 text-xs text-ink-2 active:bg-line"
+              onClick={() => setNote(suggestion)}
+            >
+              {suggestion}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* 金额显示区 */}
       <div className="flex min-h-14 flex-col items-end justify-center px-4 pb-1">
@@ -369,7 +397,7 @@ export function AddBill() {
           locale={locale}
         />
       </Sheet>
-      <Sheet open={timeOpen} onOpenChange={setTimeOpen}>
+      <Sheet open={timeOpen} onOpenChange={setTimeOpen} title={t("add.pickTime")}>
         <TimePicker value={time} onChange={setTime} />
       </Sheet>
 

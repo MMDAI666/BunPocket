@@ -47,14 +47,6 @@ export function yearMonthLabel(
   }).format(new Date(year, month - 1, 1));
 }
 
-/** 分类系统名的展示名：name_key 走 i18n，否则用存储名 */
-export function categoryName(
-  cat: { name: string; name_key: string | null },
-  t: (key: string) => string,
-): string {
-  return cat.name_key ? t(cat.name_key) : cat.name;
-}
-
 /**
  * 读取 CSS 语义 token 的当前值（供 ECharts 等非 Tailwind 场景取色）。
  * 主题切换后重新调用即可拿到新值。

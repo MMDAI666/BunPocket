@@ -13,7 +13,14 @@ import {
 import { buildCategoryTree } from "../lib/category";
 import { fileToIconDataUrl } from "../lib/image";
 import { cn } from "../lib/cn";
-import { Image as ImageIcon } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  Image as ImageIcon,
+  Palette,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { toast } from "../components/ui/Toast";
 import { Segmented } from "../components/ui/Segmented";
 import { Sheet } from "../components/ui/Sheet";
@@ -196,6 +203,7 @@ export function Categories() {
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center text-left"
+          aria-expanded={cat.children.length > 0 ? expanded.has(cat.id) : undefined}
           onClick={() => cat.children.length > 0 && toggleExpand(cat.id)}
         >
           <IconBadge icon={cat.icon} iconImage={cat.icon_image} nameKey={cat.name_key} iconType={cat.icon_type} />
@@ -213,14 +221,16 @@ export function Categories() {
             </span>
           )}
         </button>
-        <button
-          type="button"
-          className="ml-1 rounded-full px-2 py-1 text-sm text-ink-3 active:bg-chip"
-          onClick={() => openSheet(cat, "add")}
-          aria-label={t("categories.addChild")}
-        >
-          ＋
-        </button>
+        {depth === 0 && (
+          <button
+            type="button"
+            className="ml-1 rounded-full px-2 py-1 text-sm text-ink-3 active:bg-chip"
+            onClick={() => openSheet(cat, "add")}
+            aria-label={t("categories.addChild")}
+          >
+            ＋
+          </button>
+        )}
         <button
           type="button"
           className="rounded-full px-2 py-1 text-sm text-ink-3 active:bg-chip"
@@ -433,23 +443,36 @@ export function Categories() {
       </Sheet>
 
       {/* 更多操作 */}
-      <Sheet open={sheet === "more"} onOpenChange={(v) => !v && closeSheet()}>
+      <Sheet
+        open={sheet === "more"}
+        onOpenChange={(v) => !v && closeSheet()}
+        title={target ? displayName(target) : t("categories.more")}
+      >
         {target && (
           <div className="flex flex-col gap-1 py-1">
             <SheetRow
-              label={`✏️ ${t("categories.rename")}`}
+              icon={<Pencil size={16} className="text-ink-3" />}
+              label={t("categories.rename")}
               onClick={() => openSheet(target, "rename")}
             />
             <SheetRow
-              label={`🎨 ${t("categories.changeIcon")}`}
+              icon={<Palette size={16} className="text-ink-3" />}
+              label={t("categories.changeIcon")}
               onClick={() => openSheet(target, "icon")}
             />
             {target.is_system === 1 ? (
               <SheetRow
+                icon={
+                  target.hidden ? (
+                    <Eye size={16} className="text-ink-3" />
+                  ) : (
+                    <EyeOff size={16} className="text-ink-3" />
+                  )
+                }
                 label={
                   target.hidden
-                    ? `👁 ${t("categories.unhide")}`
-                    : `🙈 ${t("categories.hide")}`
+                    ? t("categories.unhide")
+                    : t("categories.hide")
                 }
                 onClick={() => {
                   void runUpdate(async () => {
@@ -462,7 +485,8 @@ export function Categories() {
               />
             ) : (
               <SheetRow
-                label={`🗑 ${t("common.delete")}`}
+                icon={<Trash2 size={16} />}
+                label={t("common.delete")}
                 danger
                 onClick={() => setConfirmDelete(true)}
               />
@@ -484,10 +508,12 @@ export function Categories() {
 }
 
 function SheetRow({
+  icon,
   label,
   onClick,
   danger = false,
 }: {
+  icon?: ReactNode;
   label: string;
   onClick: () => void;
   danger?: boolean;
@@ -496,11 +522,12 @@ function SheetRow({
     <button
       type="button"
       className={cn(
-        "rounded-lg px-2 py-3 text-left text-[15px] active:bg-chip",
+        "flex items-center gap-2 rounded-lg px-2 py-3 text-left text-[15px] active:bg-chip",
         danger ? "text-danger" : "text-ink",
       )}
       onClick={onClick}
     >
+      {icon}
       {label}
     </button>
   );

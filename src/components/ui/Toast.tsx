@@ -1,4 +1,5 @@
 import { Toast } from "@base-ui/react/toast";
+import { cn } from "../../lib/cn";
 
 // 全局命令式 toast：toast.show("已保存") / toast.show("失败", "error")
 const manager = Toast.createToastManager<{ type?: string }>();
@@ -17,7 +18,12 @@ function ToastViewport() {
           <Toast.Root
             key={item.id}
             toast={item}
-            className="toast-item pointer-events-auto max-w-full truncate rounded-full bg-ink px-4 py-2 text-sm text-card shadow-lg"
+            className={cn(
+              "toast-item pointer-events-auto max-w-full truncate rounded-full px-4 py-2 text-sm shadow-lg",
+              item.type === "error"
+                ? "bg-danger text-white"
+                : "bg-ink text-card",
+            )}
           >
             <Toast.Title>{item.title}</Toast.Title>
           </Toast.Root>

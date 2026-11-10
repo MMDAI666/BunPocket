@@ -7,6 +7,7 @@ import {
   type Category,
   billsInDateRange,
   budgetCycle,
+  dailyExpenseTotals,
   daysUntilCycleEnd,
   getBudgets,
   loadCategoryRows,
@@ -14,10 +15,20 @@ import {
 } from "../db";
 import { buildCategoryTree, findCategory } from "../lib/category";
 import {
+  type CategoryBudgetRow,
+  budgetProgress,
+  budgetedRowsByUsage,
+  categoryBudgetRows,
+  isOverBudget,
+  leafmostBudgetRows,
+} from "../lib/budget";
+import {
   formatMoneyCompact,
   todayStr,
   weekdayShort,
-} from "../lib/format";import { getSetting } from "../settings";
+} from "../lib/format";
+import { getSetting } from "../settings";
+import { cn } from "../lib/cn";
 import { IconBadge } from "../components/ui/IconBadge";
 import { ErrorState } from "../components/ui/ErrorState";
 import { ProgressRing } from "../components/ui/ProgressRing";
@@ -37,6 +48,8 @@ interface HomeData {
   budgetSpent: number;
   daysLeft: number;
   categories: Category[];
+  /** 设置了分类预算的分类（按周期使用率取前 3），预算卡下方展示 */
+  categoryBudgets: CategoryBudgetRow[];
 }
 
 async function loadHome(): Promise<HomeData> {
@@ -90,13 +103,34 @@ async function loadHome(): Promise<HomeData> {
     list.push(bill);
     byDay.set(bill.date, list);
   }
+  // 日头合计走 SQL 聚合：recent 只有 10 条，直接求和会在当天账单多于 10 笔时少算
+  const oldestDate = recent.reduce(
+    (min, bill) => (bill.date < min ? bill.date : min),
+    today,
+  );
+  const dayTotals = await dailyExpenseTotals(oldestDate, today);
+  const dayTotalByDate = new Map(dayTotals.map((row) => [row.date, row.total]));
   const groups: DayGroup[] = [...byDay.entries()].map(([date, bills]) => ({
     date,
     bills,
-    expenseCents: bills
-      .filter((b) => b.kind === "expense")
-      .reduce((sum, b) => sum + b.amount_cents, 0),
+    expenseCents:
+      dayTotalByDate.get(date) ??
+      bills
+        .filter((b) => b.kind === "expense")
+        .reduce((sum, b) => sum + b.amount_cents, 0),
   }));
+
+  const cycleBills = rangeBills.filter(
+    (bill) => bill.date >= cycle.from && bill.date <= cycle.to,
+  );
+  const expenseRoots = categories.filter((cat) => cat.kind === "expense");
+  // Top3 只取"最具体"的预算节点：父子都设预算时不把同一笔支出展示两遍
+  const categoryBudgets = budgetedRowsByUsage(
+    leafmostBudgetRows(
+      categoryBudgetRows(expenseRoots, budgets.byCategory, cycleBills),
+    ),
+    3,
+  );
 
   return {
     todayCents,
@@ -106,6 +140,7 @@ async function loadHome(): Promise<HomeData> {
     budgetSpent,
     daysLeft: daysUntilCycleEnd(cycle),
     categories,
+    categoryBudgets,
   };
 }
 
@@ -117,6 +152,7 @@ const EMPTY: HomeData = {
   budgetSpent: 0,
   daysLeft: 1,
   categories: [],
+  categoryBudgets: [],
 };
 
 export function Home() {
@@ -219,7 +255,9 @@ export function Home() {
             onClick={() => navigate("/budget")}
             role="button"
             tabIndex={0}
-            onKeyDown={(e) => e.key === "Enter" && navigate("/budget")}
+            onKeyDown={(e) =>
+              (e.key === "Enter" || e.key === " ") && navigate("/budget")
+            }
           >
             {loading || failed ? (
               <div className="py-2 text-center text-sm text-ink-3">…</div>
@@ -271,6 +309,53 @@ export function Home() {
           </div>
         ) : (
           <>
+          {data.categoryBudgets.length > 0 && (
+            <button
+              type="button"
+              className="mb-2 w-full rounded-2xl bg-card p-3 text-left active:bg-chip"
+              onClick={() => navigate("/budget")}
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-bold text-ink">
+                  {t("home.categoryBudget")}
+                </h2>
+                <span className="text-xs text-ink-3">
+                  {t("home.viewAll")} ›
+                </span>
+              </div>
+              <div className="mt-2 flex flex-col gap-2">
+                {data.categoryBudgets.map((row) => (
+                  <div key={row.cat.id}>
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="min-w-0 flex-1 truncate text-ink-2">
+                        {row.cat.name_key ? t(row.cat.name_key) : row.cat.name}
+                      </span>
+                      <span
+                        className={cn(
+                          "shrink-0",
+                          isOverBudget(row) ? "text-expense" : "text-ink-3",
+                        )}
+                      >
+                        {formatMoneyCompact(row.spent, locale)} / ¥
+                        {formatMoneyCompact(row.budget, locale)}
+                      </span>
+                    </div>
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-chip">
+                      <div
+                        className={cn(
+                          "h-full rounded-full",
+                          isOverBudget(row) ? "bg-expense" : "bg-brand",
+                        )}
+                        style={{
+                          width: `${Math.round(budgetProgress(row) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </button>
+          )}
           <div className="flex items-center justify-between px-1 pb-1">
             <h2 className="text-sm font-bold text-ink">
               {t("home.recentBills")}
