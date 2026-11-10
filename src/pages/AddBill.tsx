@@ -22,6 +22,7 @@ import { MonthCalendar } from "../components/ui/MonthCalendar";
 import { TimePicker } from "../components/ui/TimePicker";
 import { NumberPad } from "../components/ui/NumberPad";
 import { IconBadge } from "../components/ui/IconBadge";
+import { ErrorState } from "../components/ui/ErrorState";
 import { toast } from "../components/ui/Toast";
 import { useLocale } from "../hooks/useLocale";
 
@@ -45,9 +46,13 @@ export function AddBill() {
   const [dateOpen, setDateOpen] = useState(false);
   const [timeOpen, setTimeOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let alive = true;
+    setFailed(false);
     (async () => {
       try {
         const rows = await loadCategoryRows();
@@ -56,7 +61,12 @@ export function AddBill() {
         setRoots(tree);
         if (editId) {
           const bill = await getBill(editId);
-          if (!bill || !alive) return;
+          if (!alive) return;
+          if (!bill) {
+            // 编辑目标不存在（记录已删/脏链接）：按加载失败处理，避免进入空白表单
+            setFailed(true);
+            return;
+          }
           setKind(bill.kind);
           setDate(bill.date);
           setTime(bill.time);
@@ -66,13 +76,13 @@ export function AddBill() {
           setSelectedPath(categoryPath(tree, bill.category_id));
         }
       } catch {
-        if (alive) setRoots([]);
+        if (alive) setFailed(true);
       }
     })();
     return () => {
       alive = false;
     };
-  }, [editId]);
+  }, [editId, reloadKey]);
 
   const visibleRoots = useMemo(
     () => (roots ?? []).filter((c) => !c.hidden && c.kind === kind),
@@ -89,11 +99,16 @@ export function AddBill() {
   };
 
   const save = async (thenNew: boolean) => {
+    if (saving) return;
     if (!current) {
       toast.show(t("add.selectCategoryFirst"), "error");
       return;
     }
-    if (cents == null) return;
+    if (cents == null) {
+      // OK 按钮在无效金额时是禁用的；「再记」需要显式提示，避免点了没反应
+      if (expr.trim() !== "") toast.show(t("common.invalidAmount"), "error");
+      return;
+    }
     const payload = {
       amount_cents: cents,
       kind,
@@ -103,6 +118,7 @@ export function AddBill() {
       date,
       time,
     };
+    setSaving(true);
     try {
       if (editId) {
         await updateBill(editId, payload);
@@ -119,11 +135,43 @@ export function AddBill() {
       }
     } catch {
       toast.show(t("common.saveFailed"), "error");
+    } finally {
+      setSaving(false);
     }
   };
 
-  if (roots === null) {
-    return <div className="h-full bg-page" />;
+  if (roots === null || failed) {
+    return (
+      <div className="flex h-full flex-col bg-card">
+        <div className="flex items-center px-2 pt-[max(env(safe-area-inset-top),0.5rem)] pb-1">
+          <button
+            type="button"
+            className="flex h-10 w-10 items-center justify-center rounded-full text-xl text-ink active:bg-chip"
+            onClick={goBack}
+            aria-label={t("common.back")}
+          >
+            ‹
+          </button>
+          <div className="flex-1 text-center text-base font-semibold text-ink">
+            {t("nav.add")}
+          </div>
+          <div className="w-10" />
+        </div>
+        <div className="px-4 pt-8">
+          {failed ? (
+            <ErrorState
+              onRetry={() => {
+                setFailed(false);
+                setRoots(null);
+                setReloadKey((k) => k + 1);
+              }}
+            />
+          ) : (
+            <div className="py-10 text-center text-sm text-ink-3">…</div>
+          )}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -306,7 +354,7 @@ export function AddBill() {
         value={expr}
         onChange={setExpr}
         onSubmit={() => void save(false)}
-        submitDisabled={cents == null || !current}
+        submitDisabled={saving || cents == null || !current}
         onAnother={() => void save(true)}
       />
 
@@ -333,7 +381,13 @@ export function AddBill() {
         danger
         onConfirm={() => {
           if (editId) {
-            void deleteBill(editId).then(() => navigate("/", { replace: true }));
+            setSaving(true);
+            void deleteBill(editId)
+              .then(() => navigate("/", { replace: true }))
+              .catch(() => {
+                setSaving(false);
+                toast.show(t("common.deleteFailed"), "error");
+              });
           }
         }}
       />

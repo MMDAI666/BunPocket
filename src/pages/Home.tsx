@@ -19,6 +19,7 @@ import {
   weekdayShort,
 } from "../lib/format";import { getSetting } from "../settings";
 import { IconBadge } from "../components/ui/IconBadge";
+import { ErrorState } from "../components/ui/ErrorState";
 import { ProgressRing } from "../components/ui/ProgressRing";
 import { useLocale } from "../hooks/useLocale";
 
@@ -43,7 +44,7 @@ async function loadHome(): Promise<HomeData> {
   const categories = buildCategoryTree(rows);
   const billingDay = Math.min(
     Math.max(Number((await getSetting("billing_day")) ?? "1") || 1, 1),
-    31,
+    28,
   );
   const cycle = budgetCycle(billingDay);
 
@@ -123,16 +124,30 @@ export function Home() {
   const { locale } = useLocale();
   const navigate = useNavigate();
   const [data, setData] = useState<HomeData>(EMPTY);
+  const [failed, setFailed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let alive = true;
+    setFailed(false);
+    setLoading(true);
     loadHome()
-      .then((d) => alive && setData(d))
-      .catch(() => alive && setData(EMPTY));
+      .then((d) => {
+        if (!alive) return;
+        setData(d);
+        setLoading(false);
+      })
+      .catch(() => {
+        // 不要降级成"空数据"，否则用户会误以为账本丢了
+        if (!alive) return;
+        setFailed(true);
+        setLoading(false);
+      });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   const remaining = data.budgetTotal - data.budgetSpent;
   const progress =
@@ -185,14 +200,14 @@ export function Home() {
           <div className="flex-1 text-center">
             <div className="text-xs text-white/80">{t("home.todayExpense")}(¥)</div>
             <div className="mt-1 text-2xl font-light">
-              {formatMoneyCompact(data.todayCents, locale)}
+              {loading || failed ? "—" : formatMoneyCompact(data.todayCents, locale)}
             </div>
           </div>
           <div className="h-10 w-px bg-white/30" />
           <div className="flex-1 text-center">
             <div className="text-xs text-white/80">{t("home.monthExpense")}(¥)</div>
             <div className="mt-1 text-2xl font-light">
-              {formatMoneyCompact(data.monthCents, locale)}
+              {loading || failed ? "—" : formatMoneyCompact(data.monthCents, locale)}
             </div>
           </div>
         </div>
@@ -206,7 +221,9 @@ export function Home() {
             tabIndex={0}
             onKeyDown={(e) => e.key === "Enter" && navigate("/budget")}
           >
-            {data.budgetTotal <= 0 ? (
+            {loading || failed ? (
+              <div className="py-2 text-center text-sm text-ink-3">…</div>
+            ) : data.budgetTotal <= 0 ? (
               <div className="py-2 text-center text-sm text-ink-3">
                 {t("budget.none")} · {t("home.setBudget")} →
               </div>
@@ -244,8 +261,16 @@ export function Home() {
         </div>
       </header>
 
-      {/* 内容区：最近记录 */}
+      {/* 内容区：最近记录（失败时保留页面外壳与导航入口） */}
       <div className="flex-1 overflow-y-auto px-3 pt-4 pb-28">
+        {failed ? (
+          <ErrorState onRetry={() => setReloadKey((k) => k + 1)} />
+        ) : loading ? (
+          <div className="rounded-2xl bg-card py-10 text-center text-sm text-ink-3">
+            …
+          </div>
+        ) : (
+          <>
           <div className="flex items-center justify-between px-1 pb-1">
             <h2 className="text-sm font-bold text-ink">
               {t("home.recentBills")}
@@ -315,6 +340,8 @@ export function Home() {
               </div>
             </div>
           ))}
+          </>
+        )}
       </div>
 
       {/* FAB */}

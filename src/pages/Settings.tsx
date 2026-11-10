@@ -34,6 +34,8 @@ export function Settings() {
   const [lastBackup, setLastBackup] = useState<Date | null>(null);
   const [hasBackup, setHasBackup] = useState(false);
   const [confirmRestore, setConfirmRestore] = useState(false);
+  /** 备份/恢复是 IO 重操作（恢复还会换库文件）：全程加锁防重复触发 */
+  const [backupBusy, setBackupBusy] = useState(false);
 
   const refreshBackupInfo = async () => {
     try {
@@ -141,16 +143,20 @@ export function Settings() {
           />
           <SettingsRow
             label={t("backup.now")}
+            disabled={backupBusy}
             onClick={() => {
+              if (backupBusy) return;
+              setBackupBusy(true);
               void backupNow()
                 .then(() => toast.show(t("backup.done")))
                 .then(refreshBackupInfo)
-                .catch(() => toast.show(t("backup.failed"), "error"));
+                .catch(() => toast.show(t("backup.failed"), "error"))
+                .finally(() => setBackupBusy(false));
             }}
           />
           <SettingsRow
             label={t("backup.restore")}
-            disabled={!hasBackup}
+            disabled={!hasBackup || backupBusy}
             value={hasBackup ? undefined : t("backup.noBackup")}
             onClick={() => setConfirmRestore(true)}
           />
@@ -175,6 +181,7 @@ export function Settings() {
           onClick={() => {
             void setKeepCount(keepDraft)
               .then(refreshBackupInfo)
+              .catch(() => toast.show(t("backup.failed"), "error"))
               .finally(() => setKeepSheet(false));
           }}
         >
@@ -189,9 +196,30 @@ export function Settings() {
         content={t("backup.restoreContent")}
         danger
         onConfirm={() => {
-          void restoreLatestBackup().catch(() => {
-            toast.show(t("backup.failed"), "error");
-          });
+          if (backupBusy) return;
+          setBackupBusy(true);
+          void restoreLatestBackup()
+            .then((result) => {
+              if (result === "restart-required") {
+                toast.show(t("backup.restartRequired"));
+              }
+            })
+            .catch((err: unknown) => {
+              const code = err instanceof Error ? err.message : "";
+              if (code === "backup-from-newer-version") {
+                toast.show(t("backup.tooNew"), "error");
+              } else if (code === "backup-version-mismatch") {
+                toast.show(t("backup.versionMismatch"), "error");
+              } else if (
+                code === "backup-integrity" ||
+                code === "backup-invalid"
+              ) {
+                toast.show(t("backup.integrityFailed"), "error");
+              } else {
+                toast.show(t("backup.failed"), "error");
+              }
+            })
+            .finally(() => setBackupBusy(false));
         }}
       />
     </div>

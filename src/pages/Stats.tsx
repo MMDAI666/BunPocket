@@ -10,6 +10,7 @@ import { cn } from "../lib/cn";
 import { Chart } from "../components/Chart";
 import { Segmented } from "../components/ui/Segmented";
 import { IconBadge } from "../components/ui/IconBadge";
+import { ErrorState } from "../components/ui/ErrorState";
 import { useLocale } from "../hooks/useLocale";
 
 const DONUT_PALETTE = [
@@ -40,6 +41,9 @@ export function Stats() {
   const [showAll, setShowAll] = useState(false);
   const [drillPath, setDrillPath] = useState<Category[]>([]);
   const [data, setData] = useState<StatsData | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const months = useMemo(() => {
     const list: { y: number; m: number }[] = [];
@@ -57,6 +61,8 @@ export function Stats() {
 
   useEffect(() => {
     let alive = true;
+    setFailed(false);
+    setLoading(true);
     (async () => {
       try {
         let from: string;
@@ -73,15 +79,19 @@ export function Stats() {
           billsInDateRange(from, to),
           loadCategoryRows(),
         ]);
-        if (alive) setData({ bills, roots: buildCategoryTree(rows) });
+        if (!alive) return;
+        setData({ bills, roots: buildCategoryTree(rows) });
+        setLoading(false);
       } catch {
-        if (alive) setData({ bills: [], roots: [] });
+        if (!alive) return;
+        setFailed(true);
+        setLoading(false);
       }
     })();
     return () => {
       alive = false;
     };
-  }, [mode, month, year]);
+  }, [mode, month, year, reloadKey]);
 
   const totals = useMemo(() => {
     let expense = 0;
@@ -361,7 +371,15 @@ export function Stats() {
               ))}
         </div>
 
-        {/* 收支汇总横幅 */}
+        {/* 收支汇总横幅（加载/失败时只保留外壳，避免展示假 0/旧周期数据） */}
+        {failed ? (
+          <div className="pt-2">
+            <ErrorState onRetry={() => setReloadKey((k) => k + 1)} />
+          </div>
+        ) : loading ? (
+          <div className="py-10 text-center text-sm text-ink-3">…</div>
+        ) : (
+          <>
         <div className="grid grid-cols-3 rounded-2xl bg-gradient-to-r from-brand-1 to-brand-2 p-4 text-white">
           <div>
             <div className="text-xs text-white/80">{t("stats.expense")}(¥)</div>
@@ -522,6 +540,8 @@ export function Stats() {
             </div>
           </div>
         </section>
+          </>
+        )}
       </div>
     </div>
   );

@@ -136,9 +136,10 @@ export async function categoryDeleteBlocker(id: number): Promise<"children" | "b
 
 export async function deleteCategory(id: number): Promise<void> {
   const database = await getDb();
-  // budget 表没有外键，删除分类时同步清理其预算行，避免永久孤儿数据
-  await database.execute("DELETE FROM budget WHERE category_id = $1", [id]);
+  // 先删分类、再删预算：即使第二步失败也只留下不可见的孤儿预算；
+  // 反过来先删预算再删分类失败会丢用户预算数据。
   await database.execute("DELETE FROM category WHERE id = $1", [id]);
+  await database.execute("DELETE FROM budget WHERE category_id = $1", [id]);
 }
 
 // ---------- 账单 ----------
@@ -293,9 +294,11 @@ function lastDayOfMonth(year: number, month: number): number {
   return new Date(year, month + 1, 0).getDate();
 }
 
-/** 结算日 B 的预算周期：[本月B号, 下月B-1号]；月内不足 B 天时取该月最后一天 */
+/** 结算日 B 的预算周期：[本月B号, 下月B-1号]；月内不足 B 天时取该月最后一天。
+ *  结算日统一限制在 1–28（避免 29–31 在短月份产生周期首尾重叠，UI/小组件同规则）。 */
 export function budgetCycle(billingDay: number, now = new Date()): DateRange {
-  const b = Math.min(Math.max(billingDay, 1), 31);
+  const safe = Number.isFinite(billingDay) ? billingDay : 1;
+  const b = Math.min(Math.max(safe, 1), 28);
   const curY = now.getFullYear();
   const curM = now.getMonth();
   const effectiveB = Math.min(b, lastDayOfMonth(curY, curM));

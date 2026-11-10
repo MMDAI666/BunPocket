@@ -18,6 +18,7 @@ import { toast } from "../components/ui/Toast";
 import { Segmented } from "../components/ui/Segmented";
 import { Sheet } from "../components/ui/Sheet";
 import { Confirm } from "../components/ui/Confirm";
+import { ErrorState } from "../components/ui/ErrorState";
 import { IconBadge } from "../components/ui/IconBadge";
 import { EmojiPicker } from "../components/ui/EmojiPicker";
 
@@ -38,13 +39,16 @@ export function Categories() {
   });
   const [iconForNew, setIconForNew] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const reload = async () => {
     try {
       setRoots(buildCategoryTree(await loadCategoryRows()));
+      setFailed(false);
     } catch {
-      setRoots([]);
+      setFailed(true);
     }
   };
 
@@ -85,50 +89,79 @@ export function Categories() {
   };
 
   const doSaveName = async () => {
+    if (busy) return;
     const name = nameValue.trim();
     if (!name) return;
-    if (sheet === "add") {
-      if (target) {
-        await insertCategory({
-          parent_id: target.id,
-          name,
-          icon: newIcon.icon,
-          icon_image: newIcon.image,
-          icon_type: newIcon.image ? "image" : "emoji",
-          kind: target.kind,
-        });
-        setExpanded((prev) => new Set(prev).add(target.id));
-      } else {
-        await insertCategory({
-          parent_id: null,
-          name,
-          icon: newIcon.icon,
-          icon_image: newIcon.image,
-          icon_type: newIcon.image ? "image" : "emoji",
-          kind,
-        });
+    setBusy(true);
+    try {
+      if (sheet === "add") {
+        if (target) {
+          await insertCategory({
+            parent_id: target.id,
+            name,
+            icon: newIcon.icon,
+            icon_image: newIcon.image,
+            icon_type: newIcon.image ? "image" : "emoji",
+            kind: target.kind,
+          });
+          setExpanded((prev) => new Set(prev).add(target.id));
+        } else {
+          await insertCategory({
+            parent_id: null,
+            name,
+            icon: newIcon.icon,
+            icon_image: newIcon.image,
+            icon_type: newIcon.image ? "image" : "emoji",
+            kind,
+          });
+        }
+      } else if (sheet === "rename" && target) {
+        await updateCategory(target.id, { name, name_key: null });
       }
-    } else if (sheet === "rename" && target) {
-      await updateCategory(target.id, { name, name_key: null });
+      closeSheet();
+      await reload();
+    } catch {
+      toast.show(t("common.saveFailed"), "error");
+    } finally {
+      setBusy(false);
     }
-    closeSheet();
-    await reload();
   };
 
   const doDelete = async () => {
-    if (!target) return;
-    const blocker = await categoryDeleteBlocker(target.id);
-    if (blocker === "children") {
-      toast.show(t("categories.hasChildren"), "error");
-      return;
+    if (!target || busy) return;
+    setBusy(true);
+    try {
+      const blocker = await categoryDeleteBlocker(target.id);
+      if (blocker === "children") {
+        toast.show(t("categories.hasChildren"), "error");
+        return;
+      }
+      if (blocker === "bills") {
+        toast.show(t("categories.hasBills"), "error");
+        return;
+      }
+      await deleteCategory(target.id);
+      closeSheet();
+      await reload();
+    } catch {
+      toast.show(t("common.deleteFailed"), "error");
+    } finally {
+      setBusy(false);
     }
-    if (blocker === "bills") {
-      toast.show(t("categories.hasBills"), "error");
-      return;
+  };
+
+  /** 写分类后统一收口：防连点 + 失败提示 + 重新加载 */
+  const runUpdate = async (fn: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fn();
+      await reload();
+    } catch {
+      toast.show(t("common.saveFailed"), "error");
+    } finally {
+      setBusy(false);
     }
-    await deleteCategory(target.id);
-    closeSheet();
-    await reload();
   };
 
   const onPickFile = async (file: File | undefined) => {
@@ -141,9 +174,13 @@ export function Categories() {
         return;
       }
       if (target) {
-        await updateCategory(target.id, { icon_image: dataUrl, icon_type: "image" });
-        closeSheet();
-        await reload();
+        await runUpdate(async () => {
+          await updateCategory(target.id, {
+            icon_image: dataUrl,
+            icon_type: "image",
+          });
+          closeSheet();
+        });
       }
     } catch {
       toast.show(t("common.saveFailed"), "error");
@@ -228,27 +265,35 @@ export function Categories() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-8">
-        <div className="mx-3 rounded-2xl bg-card">
-          {roots === null ? (
-            <div className="py-10 text-center text-sm text-ink-3">…</div>
-          ) : visibleRoots.length === 0 ? (
-            <div className="py-10 text-center text-sm text-ink-3">
-              {t("common.empty")}
+        {failed ? (
+          <div className="px-3">
+            <ErrorState onRetry={() => void reload()} />
+          </div>
+        ) : (
+          <>
+            <div className="mx-3 rounded-2xl bg-card">
+              {roots === null ? (
+                <div className="py-10 text-center text-sm text-ink-3">…</div>
+              ) : visibleRoots.length === 0 ? (
+                <div className="py-10 text-center text-sm text-ink-3">
+                  {t("common.empty")}
+                </div>
+              ) : (
+                visibleRoots.map((cat) => renderRow(cat, 0))
+              )}
             </div>
-          ) : (
-            visibleRoots.map((cat) => renderRow(cat, 0))
-          )}
-        </div>
 
-        <div className="mx-3 mt-3">
-          <button
-            type="button"
-            className="w-full rounded-2xl border border-dashed border-line bg-card py-3 text-sm text-ink-2 active:bg-chip"
-            onClick={() => openSheet(null, "add")}
-          >
-            ＋ {t("categories.addTopLevel")}
-          </button>
-        </div>
+            <div className="mx-3 mt-3">
+              <button
+                type="button"
+                className="w-full rounded-2xl border border-dashed border-line bg-card py-3 text-sm text-ink-2 active:bg-chip"
+                onClick={() => openSheet(null, "add")}
+              >
+                ＋ {t("categories.addTopLevel")}
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* 新增（一级 / 子分类，按 target 是否存在区分） */}
@@ -281,7 +326,8 @@ export function Categories() {
             />
             <button
               type="button"
-              className="shrink-0 rounded-full bg-gradient-to-r from-brand-1 to-brand-2 px-5 text-sm font-medium text-white"
+              disabled={busy}
+              className="shrink-0 rounded-full bg-gradient-to-r from-brand-1 to-brand-2 px-5 text-sm font-medium text-white disabled:opacity-50"
               onClick={() => void doSaveName()}
             >
               {t("common.save")}
@@ -309,7 +355,8 @@ export function Categories() {
             />
             <button
               type="button"
-              className="rounded-full bg-gradient-to-r from-brand-1 to-brand-2 px-5 text-sm font-medium text-white"
+              disabled={busy}
+              className="rounded-full bg-gradient-to-r from-brand-1 to-brand-2 px-5 text-sm font-medium text-white disabled:opacity-50"
               onClick={() => void doSaveName()}
             >
               {t("common.save")}
@@ -341,9 +388,14 @@ export function Categories() {
                   return;
                 }
                 if (target) {
-                  await updateCategory(target.id, { icon: emoji, icon_image: null, icon_type: "emoji" });
-                  closeSheet();
-                  await reload();
+                  await runUpdate(async () => {
+                    await updateCategory(target.id, {
+                      icon: emoji,
+                      icon_image: null,
+                      icon_type: "emoji",
+                    });
+                    closeSheet();
+                  });
                 }
               }}
             />
@@ -359,10 +411,11 @@ export function Categories() {
               <button
                 type="button"
                 className="mt-2 w-full rounded-xl border border-line py-2.5 text-sm text-ink-2 active:bg-chip"
-                onClick={async () => {
-                  await updateCategory(target.id, { icon_type: "auto" });
-                  closeSheet();
-                  await reload();
+                onClick={() => {
+                  void runUpdate(async () => {
+                    await updateCategory(target.id, { icon_type: "auto" });
+                    closeSheet();
+                  });
                 }}
               >
                 {t("categories.resetIcon")}
@@ -398,10 +451,13 @@ export function Categories() {
                     ? `👁 ${t("categories.unhide")}`
                     : `🙈 ${t("categories.hide")}`
                 }
-                onClick={async () => {
-                  await updateCategory(target.id, { hidden: target.hidden ? 0 : 1 });
-                  closeSheet();
-                  await reload();
+                onClick={() => {
+                  void runUpdate(async () => {
+                    await updateCategory(target.id, {
+                      hidden: target.hidden ? 0 : 1,
+                    });
+                    closeSheet();
+                  });
                 }}
               />
             ) : (

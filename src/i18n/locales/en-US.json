@@ -9,6 +9,14 @@
     "back": "Back",
     "confirmDeleteTitle": "Delete?",
     "saveFailed": "Save failed",
+    "deleteFailed": "Delete failed",
+    "loadFailed": "Failed to load, please retry",
+    "retry": "Retry",
+    "invalidAmount": "Invalid amount or over the limit",
+    "appCrashed": "Something went wrong",
+    "appCrashedHint": "Reload the app. If this keeps happening, data loading may be failing.",
+    "backHome": "Back to Home",
+    "reload": "Reload",
     "empty": "No data yet"
   },
   "nav": {
@@ -87,7 +95,11 @@
     "now": "Back Up Now",
     "restore": "Restore Latest Backup",
     "restoreTitle": "Confirm Restore",
-    "restoreContent": "Current data will be replaced by the latest backup",
+    "restoreContent": "The latest backup will replace current data; a snapshot of current data is saved first",
+    "versionMismatch": "Backup version does not match this app; restore is not supported",
+    "tooNew": "This backup is from a newer app version; please update the app first",
+    "restartRequired": "Restore prepared. Fully quit and reopen the app to finish the restore and upgrade",
+    "integrityFailed": "Backup file check failed; restore cancelled",
     "done": "Backup created",
     "failed": "Operation failed",
     "noBackup": "No backup yet"

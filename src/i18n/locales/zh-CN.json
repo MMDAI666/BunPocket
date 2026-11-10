@@ -9,6 +9,14 @@
     "back": "返回",
     "confirmDeleteTitle": "确认删除？",
     "saveFailed": "保存失败",
+    "deleteFailed": "删除失败",
+    "loadFailed": "加载失败，请重试",
+    "retry": "重试",
+    "invalidAmount": "金额无效或超出上限",
+    "appCrashed": "页面出错了",
+    "appCrashedHint": "请重新加载应用；若反复出现，可能是数据读取失败",
+    "backHome": "回到首页",
+    "reload": "重新加载",
     "empty": "暂无数据"
   },
   "nav": {
@@ -87,7 +95,11 @@
     "now": "立即备份",
     "restore": "恢复最近备份",
     "restoreTitle": "恢复确认",
-    "restoreContent": "将用最近备份覆盖当前数据",
+    "restoreContent": "将用最近备份覆盖当前数据；恢复前会自动保存一份当前数据快照",
+    "versionMismatch": "备份版本与当前应用不一致，暂不支持恢复",
+    "tooNew": "备份来自更新版本的应用，请先升级应用再恢复",
+    "restartRequired": "恢复已准备完成，请完全退出应用后重新打开，以完成数据替换和升级",
+    "integrityFailed": "备份文件校验失败，已取消恢复",
     "done": "已备份",
     "failed": "操作失败",
     "noBackup": "暂无备份"

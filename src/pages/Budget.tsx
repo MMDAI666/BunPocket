@@ -9,22 +9,27 @@ import {
 } from "../db";
 import { buildCategoryTree } from "../lib/category";
 import { formatMoney } from "../lib/format";
+import { MAX_AMOUNT_CENTS } from "../lib/money";
 import { getSetting, setSetting } from "../settings";
 import { Wheel } from "../components/ui/Wheel";
 import { Sheet } from "../components/ui/Sheet";
 import { IconBadge } from "../components/ui/IconBadge";
+import { ErrorState } from "../components/ui/ErrorState";
+import { toast } from "../components/ui/Toast";
 import { useLocale } from "../hooks/useLocale";
 
 const BILLING_DAYS = Array.from({ length: 28 }, (_, i) => i + 1);
 
-/** 元的字符串 → 分（无效返回 null） */
+/** 元的字符串 → 分（无效/超上限返回 null） */
 function yuanToCents(input: string): number | null {
   const trimmed = input.trim();
   if (!/^\d*\.?\d{0,2}$/.test(trimmed) || trimmed === "" || trimmed === ".") {
     return null;
   }
   const cents = Math.round(Number(trimmed) * 100);
-  return Number.isFinite(cents) && cents >= 0 ? cents : null;
+  return Number.isFinite(cents) && cents >= 0 && cents <= MAX_AMOUNT_CENTS
+    ? cents
+    : null;
 }
 
 export function Budget() {
@@ -39,9 +44,15 @@ export function Budget() {
   const [editCatId, setEditCatId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
   const [dayOpen, setDayOpen] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let alive = true;
+    setFailed(false);
+    setLoading(true);
     (async () => {
       try {
         const [budgets, rows, day] = await Promise.all([
@@ -54,14 +65,17 @@ export function Budget() {
         setByCategory(budgets.byCategory);
         setRoots(buildCategoryTree(rows).filter((c) => c.kind === "expense"));
         setBillingDay(Math.min(Math.max(Number(day) || 1, 1), 28));
+        setLoading(false);
       } catch {
-        /* 浏览器环境忽略 */
+        if (!alive) return;
+        setFailed(true);
+        setLoading(false);
       }
     })();
     return () => {
       alive = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   const openEdit = (catId: number, current: number | null) => {
     setEditCatId(catId);
@@ -69,22 +83,32 @@ export function Budget() {
   };
 
   const saveEdit = async () => {
-    if (editCatId == null) return;
+    if (editCatId == null || saving) return;
     const trimmed = editValue.trim();
     const cents = trimmed === "" ? 0 : yuanToCents(editValue);
-    if (cents == null) return;
-    await setBudget(editCatId, cents);
-    setEditCatId(null);
-    if (editCatId === 0) {
-      setTotal(cents > 0 ? cents : null);
-    } else if (cents > 0) {
-      setByCategory((prev) => ({ ...prev, [editCatId]: cents }));
-    } else {
-      setByCategory((prev) => {
-        const next = { ...prev };
-        delete next[editCatId];
-        return next;
-      });
+    if (cents == null) {
+      toast.show(t("common.invalidAmount"), "error");
+      return;
+    }
+    setSaving(true);
+    try {
+      await setBudget(editCatId, cents);
+      setEditCatId(null);
+      if (editCatId === 0) {
+        setTotal(cents > 0 ? cents : null);
+      } else if (cents > 0) {
+        setByCategory((prev) => ({ ...prev, [editCatId]: cents }));
+      } else {
+        setByCategory((prev) => {
+          const next = { ...prev };
+          delete next[editCatId];
+          return next;
+        });
+      }
+    } catch {
+      toast.show(t("common.saveFailed"), "error");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -108,6 +132,12 @@ export function Budget() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-8">
+        {failed ? (
+          <ErrorState onRetry={() => setReloadKey((k) => k + 1)} />
+        ) : loading ? (
+          <div className="py-10 text-center text-sm text-ink-3">…</div>
+        ) : (
+          <>
         <div className="rounded-2xl bg-card">
           <button
             type="button"
@@ -163,6 +193,8 @@ export function Budget() {
             );
           })}
         </div>
+          </>
+        )}
       </div>
 
       {/* 金额编辑 */}
@@ -181,7 +213,8 @@ export function Budget() {
             />
             <button
               type="button"
-              className="rounded-full bg-gradient-to-r from-brand-1 to-brand-2 px-5 text-sm font-medium text-white"
+              disabled={saving}
+              className="rounded-full bg-gradient-to-r from-brand-1 to-brand-2 px-5 text-sm font-medium text-white disabled:opacity-50"
               onClick={() => void saveEdit()}
             >
               {t("common.save")}
@@ -203,10 +236,15 @@ export function Budget() {
         />
         <button
           type="button"
-          className="mt-2 w-full rounded-full bg-gradient-to-r from-brand-1 to-brand-2 py-2.5 text-sm font-medium text-white"
-          onClick={async () => {
-            await setSetting("billing_day", String(billingDay));
-            setDayOpen(false);
+          disabled={saving}
+          className="mt-2 w-full rounded-full bg-gradient-to-r from-brand-1 to-brand-2 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+          onClick={() => {
+            if (saving) return;
+            setSaving(true);
+            void setSetting("billing_day", String(billingDay))
+              .then(() => setDayOpen(false))
+              .catch(() => toast.show(t("common.saveFailed"), "error"))
+              .finally(() => setSaving(false));
           }}
         >
           {t("common.ok")}

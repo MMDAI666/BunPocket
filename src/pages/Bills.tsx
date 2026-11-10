@@ -12,6 +12,7 @@ import {
 import { buildCategoryTree, findCategory } from "../lib/category";
 import { formatMoneyCompact, todayStr, weekdayShort } from "../lib/format";
 import { IconBadge } from "../components/ui/IconBadge";
+import { ErrorState } from "../components/ui/ErrorState";
 import { useLocale } from "../hooks/useLocale";
 
 export function Bills() {
@@ -22,6 +23,8 @@ export function Bills() {
   const [keyword, setKeyword] = useState("");
   const [bills, setBills] = useState<BillRow[] | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [failed, setFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
@@ -42,6 +45,7 @@ export function Bills() {
   useEffect(() => {
     let alive = true;
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    setFailed(false);
     debounceRef.current = setTimeout(async () => {
       const kw = keyword.trim();
       try {
@@ -57,13 +61,14 @@ export function Bills() {
         }
         if (alive) setBills(rows);
       } catch {
-        if (alive) setBills([]);
+        if (alive) setFailed(true);
       }
     }, 300);
     return () => {
       alive = false;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [keyword]);
+  }, [keyword, reloadKey]);
 
   const groups = useMemo(() => {
     const byDay = new Map<string, BillRow[]>();
@@ -101,15 +106,19 @@ export function Bills() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-8">
-        {bills === null && (
+        {failed && (
+          <ErrorState onRetry={() => setReloadKey((k) => k + 1)} />
+        )}
+        {!failed && bills === null && (
           <div className="py-10 text-center text-sm text-ink-3">…</div>
         )}
-        {bills !== null && groups.length === 0 && (
+        {!failed && bills !== null && groups.length === 0 && (
           <div className="py-10 text-center text-sm text-ink-3">
             {t("common.empty")}
           </div>
         )}
-        {groups.map((group) => (
+        {!failed &&
+          groups.map((group) => (
           <div key={group.date} className="mt-2">
             <div className="flex justify-between px-1 py-1 text-xs text-ink-3">
               <span>

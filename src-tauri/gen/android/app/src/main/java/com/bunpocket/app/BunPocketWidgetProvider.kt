@@ -50,7 +50,7 @@ class BunPocketWidgetProvider : AppWidgetProvider() {
             views.setTextViewText(R.id.widget_month_value, formatCents(data.monthCents))
             views.setTextViewText(
                 R.id.widget_budget_value,
-                if (data.hasBudget) formatCents(data.budgetRemaining.coerceAtLeast(0)) else "--",
+                if (data.hasBudget) formatCents(data.budgetRemaining?.coerceAtLeast(0)) else "--",
             )
 
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("bunpocket://add")).apply {
@@ -66,17 +66,18 @@ class BunPocketWidgetProvider : AppWidgetProvider() {
             return views
         }
 
+        /** 任一字段为 null 表示无数据或读取失败，渲染为 "--" 而不是误导性的 0 */
         private data class WidgetData(
-            val todayCents: Long,
-            val monthCents: Long,
-            val budgetRemaining: Long,
+            val todayCents: Long?,
+            val monthCents: Long?,
+            val budgetRemaining: Long?,
             val hasBudget: Boolean,
         )
 
         private fun queryData(context: Context): WidgetData {
             val dbFile = File(context.dataDir, "bunpocket.db")
             if (!dbFile.exists()) {
-                return WidgetData(0, 0, 0, false)
+                return WidgetData(null, null, null, false)
             }
             return try {
                 SQLiteDatabase.openDatabase(
@@ -85,7 +86,7 @@ class BunPocketWidgetProvider : AppWidgetProvider() {
                     SQLiteDatabase.OPEN_READONLY,
                 ).use { db ->
                     val billingDay = rawSetting(db, "billing_day")?.toIntOrNull()
-                        ?.coerceIn(1, 31) ?: 1
+                        ?.coerceIn(1, 28) ?: 1
                     val cycle = budgetCycle(billingDay)
 
                     val todayCents = sumExpense(db, "date = date('now','localtime')", null)
@@ -111,7 +112,8 @@ class BunPocketWidgetProvider : AppWidgetProvider() {
                 }
             } catch (e: Exception) {
                 android.util.Log.w("BunPocketWidget", "query failed", e)
-                WidgetData(0, 0, 0, false)
+                // 读取失败时显示 "--"：显示 0 会被误读为"今天没记账"
+                WidgetData(null, null, null, false)
             }
         }
 
@@ -154,27 +156,28 @@ class BunPocketWidgetProvider : AppWidgetProvider() {
             )
         }
 
-        /** 结算日 B 的预算周期 [B号, 下月B-1号]，与前端 db.ts budgetCycle 规则一致 */
+        /** 结算日 B 的预算周期 [B号, 下月B-1号]，与前端 db.ts budgetCycle 规则一致（内部也 clamp 1–28） */
         private fun budgetCycle(billingDay: Int): Pair<String, String> {
             val now = Calendar.getInstance()
             val y = now.get(Calendar.YEAR)
             val m = now.get(Calendar.MONTH)
+            val b = billingDay.coerceIn(1, 28)
 
-            val curB = minOf(billingDay, lastDay(y, m))
+            val curB = minOf(b, lastDay(y, m))
             val inCurrent = now.get(Calendar.DAY_OF_MONTH) >= curB
 
             val startCal = Calendar.getInstance().apply { set(y, m - (if (inCurrent) 0 else 1), 1) }
             val sy = startCal.get(Calendar.YEAR)
             val sm = startCal.get(Calendar.MONTH)
-            val sd = minOf(billingDay, lastDay(sy, sm))
+            val sd = minOf(b, lastDay(sy, sm))
 
             val endCal = Calendar.getInstance().apply { set(sy, sm + 1, 1) }
             val ey = endCal.get(Calendar.YEAR)
             val em = endCal.get(Calendar.MONTH)
-            val ed = if (billingDay == 1) {
+            val ed = if (b == 1) {
                 lastDay(sy, sm)
             } else {
-                minOf(billingDay - 1, lastDay(ey, em))
+                minOf(b - 1, lastDay(ey, em))
             }
 
             return Pair(
@@ -191,7 +194,8 @@ class BunPocketWidgetProvider : AppWidgetProvider() {
         private val compactFormat = DecimalFormat("#,##0")
         private val exactFormat = DecimalFormat("#,##0.00")
 
-        private fun formatCents(cents: Long): String {
+        private fun formatCents(cents: Long?): String {
+            if (cents == null) return "--"
             return if (cents % 100 == 0L) {
                 compactFormat.format(cents / 100)
             } else {
