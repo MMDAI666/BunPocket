@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Secrets / signing material（禁止入库）
+*.jks
+*.keystore
+*.p12
+.env
+.env.*
