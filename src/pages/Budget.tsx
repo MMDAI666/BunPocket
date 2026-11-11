@@ -151,7 +151,7 @@ export function Budget() {
         <div className="w-10" />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-8">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(2rem+env(safe-area-inset-bottom))]">
         {failed ? (
           <ErrorState onRetry={() => setReloadKey((k) => k + 1)} />
         ) : loading ? (

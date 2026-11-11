@@ -10,6 +10,8 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.bunpocket"
         android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
         <activity

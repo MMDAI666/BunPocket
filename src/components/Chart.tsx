@@ -47,6 +47,7 @@ export function Chart({ option, className, onEvents }: ChartProps) {
 
     const observer = new ResizeObserver(() => {
       // observe 首次注册也会回调一次；尺寸未变时不 resize，避免打断进行中的入场动画
+      if (chart.isDisposed()) return;
       const w = container.clientWidth;
       const h = container.clientHeight;
       if (w > 0 && h > 0 && (w !== chart.getWidth() || h !== chart.getHeight())) {

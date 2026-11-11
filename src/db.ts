@@ -228,6 +228,28 @@ export async function billsInDateRangePaged(
   );
 }
 
+/** 全历史分页（不限起始日期）：列表页"加载更多"可到达任意旧账 */
+export async function billsPage(
+  limit: number,
+  offset: number,
+): Promise<BillRow[]> {
+  const database = await getDb();
+  return database.select<BillRow[]>(
+    `SELECT * FROM bill ORDER BY date DESC, time DESC, id DESC
+     LIMIT $1 OFFSET $2`,
+    [limit, offset],
+  );
+}
+
+/** 账本最早账单日期（统计页月份/年份选择器的下界） */
+export async function earliestBillDate(): Promise<string | null> {
+  const database = await getDb();
+  const rows = await database.select<{ date: string | null }[]>(
+    "SELECT MIN(date) AS date FROM bill",
+  );
+  return rows[0]?.date ?? null;
+}
+
 /** 某区间内按日的支出合计（Home 日头展示用，避免用最近 N 条账单近似） */
 export async function dailyExpenseTotals(
   dateFrom: string,

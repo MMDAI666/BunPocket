@@ -74,9 +74,9 @@
     "viewAll": "View All",
     "collapse": "Collapse",
     "all": "All",
-    "budgetExecution": "Budget Execution",
     "other": "Other",
-    "calendarMonths": "Months are calendar months"
+    "calendarMonths": "Months are calendar months",
+    "budgetExecutionCurrent": "Budget (Current Cycle)"
   },
   "settings": {
     "title": "Settings",
@@ -106,12 +106,13 @@
     "restoreContent": "The latest backup will replace current data; a snapshot of current data is saved first",
     "versionMismatch": "Backup version does not match this app; restore is not supported",
     "tooNew": "This backup is from a newer app version; please update the app first",
-    "restartRequired": "Restore prepared. Fully quit and reopen the app to finish the restore and upgrade",
     "integrityFailed": "Backup file check failed; restore cancelled",
     "done": "Backup created",
     "failed": "Operation failed",
     "noBackup": "No backup yet",
-    "none": "None"
+    "none": "None",
+    "restartTitle": "Restart Required",
+    "restartContent": "The older backup is staged. Fully quit and reopen the app now to finish restoring. Anything you record before restarting will be replaced by the restore (the current database is snapshotted first and can be recovered from \"Pre-restore Snapshot\")."
   },
   "categories": {
     "title": "Categories",

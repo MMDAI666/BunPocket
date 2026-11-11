@@ -6,6 +6,7 @@ import type { BillKind, BillRow, Category, DateRange } from "../db";
 import {
   billsInDateRange,
   budgetCycle,
+  earliestBillDate,
   getBudgets,
   loadCategoryRows,
 } from "../db";
@@ -29,7 +30,10 @@ import { useLocale } from "../hooks/useLocale";
 const DONUT_PALETTE = [
   "#8FB8F8", "#E8A23C", "#35C6E8", "#2FBF8F", "#F0C840",
   "#F07070", "#6C7BF0", "#E88BC0", "#98D861", "#B0A6F5",
+  "#45B8AC", "#D98E5F", "#7FA65B", "#C77DB3", "#8C9BAB", "#5B8DC9",
 ];
+/** "其他"扇区与图例统一使用的颜色（暗色下也保持一致） */
+const OTHER_COLOR = "#9AA0A6";
 
 interface StatsData {
   bills: BillRow[];
@@ -61,20 +65,65 @@ export function Stats() {
     rows: BudgetRowMeta[];
     cycle: DateRange;
   } | null>(null);
+  /** 最早账单日期：月份/年份选择器覆盖到账本起点，避免跨年后旧账不可达 */
+  const [earliest, setEarliest] = useState<string | null>(null);
+  /** 主题切换时重建图表 option（ECharts 颜色取自 CSS token，不会随 class 自动更新） */
+  const [themeRevision, setThemeRevision] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    void earliestBillDate()
+      .then((date) => {
+        if (alive) setEarliest(date);
+      })
+      .catch(() => {
+        /* 忽略：回退到默认 6 个月 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => setThemeRevision((v) => v + 1));
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+    return () => observer.disconnect();
+  }, []);
 
   const months = useMemo(() => {
     const list: { y: number; m: number }[] = [];
     const d = new Date(now.getFullYear(), now.getMonth(), 1);
-    for (let i = 0; i < 6; i++) {
+    const first = earliest ? new Date(`${earliest}T00:00:00`) : null;
+    const minY = first?.getFullYear() ?? now.getFullYear();
+    const minM = first?.getMonth() ?? now.getMonth();
+    // 上限 120 个月，防止异常数据把选择器撑爆
+    for (let i = 0; i < 120; i++) {
       list.push({ y: d.getFullYear(), m: d.getMonth() + 1 });
+      if (d.getFullYear() === minY && d.getMonth() === minM) break;
       d.setMonth(d.getMonth() - 1);
+      if (d.getFullYear() < minY || (d.getFullYear() === minY && d.getMonth() < minM)) {
+        break;
+      }
     }
     return list;
-  }, []);
-  const years = useMemo(
-    () => Array.from({ length: 6 }, (_, i) => now.getFullYear() - i),
-    [],
-  );
+    // now 在组件生命周期内不变
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [earliest]);
+
+  const years = useMemo(() => {
+    const firstYear = earliest
+      ? new Date(`${earliest}T00:00:00`).getFullYear()
+      : now.getFullYear();
+    const start = Math.min(firstYear, now.getFullYear());
+    return Array.from(
+      { length: Math.min(now.getFullYear() - start + 1, 30) },
+      (_, i) => now.getFullYear() - i,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [earliest]);
 
   useEffect(() => {
     let alive = true;
@@ -152,8 +201,8 @@ export function Stats() {
     const income = new Array(12).fill(0);
     for (const b of data?.bills ?? []) {
       const m = Number(b.date.slice(5, 7)) - 1;
-      if (b.kind === "expense") expense[m] += b.amount_cents / 100;
-      else income[m] += b.amount_cents / 100;
+      if (b.kind === "expense") expense[m] += b.amount_cents;
+      else income[m] += b.amount_cents;
     }
     return { expense, income };
   }, [data]);
@@ -182,7 +231,8 @@ export function Stats() {
     const daysInMonth = new Date(month.y, month.m, 0).getDate();
     return {
       max: Math.max(...values),
-      min: Math.min(...values),
+      // 与"日均按自然日"口径一致：当月存在没记账的日期时，最低日支出就是 0
+      min: values.length < daysInMonth ? 0 : Math.min(...values),
       // 自然日口径：总额 / 当月天数（不是"有记账的天数"）
       avg: Math.round(total / daysInMonth),
     };
@@ -190,23 +240,20 @@ export function Stats() {
 
   const yearlyStats = useMemo(() => {
     if (mode !== "yearly") return null;
-    const total = monthlyTrend[dailyKind === "expense" ? "expense" : "income"].reduce(
-      (s, v) => s + Math.round(v * 100),
-      0,
-    );
-    const nonZero = monthlyTrend[dailyKind === "expense" ? "expense" : "income"].filter(
-      (v) => v > 0,
-    );
+    const series = monthlyTrend[dailyKind === "expense" ? "expense" : "income"];
+    const total = series.reduce((sum, v) => sum + v, 0);
+    const nonZero = series.filter((v) => v > 0);
     if (nonZero.length === 0) return null;
     return {
-      max: Math.round(Math.max(...nonZero) * 100),
-      min: Math.round(Math.min(...nonZero) * 100),
+      max: Math.max(...nonZero),
+      // 与月度一致：年内存在没记账的月份时，最低月为 0
+      min: nonZero.length < 12 ? 0 : Math.min(...nonZero),
       avg: Math.round(total / 12),
     };
   }, [monthlyTrend, mode, dailyKind]);
 
-  const ink3 = useMemo(() => cssColor("--color-ink-3"), []);
-  const lineColor = useMemo(() => cssColor("--color-line"), []);
+  const ink3 = useMemo(() => cssColor("--color-ink-3"), [themeRevision]);
+  const lineColor = useMemo(() => cssColor("--color-line"), [themeRevision]);
   const axisCommon = useMemo(
     () => ({
       axisLine: { lineStyle: { color: lineColor } },
@@ -231,7 +278,7 @@ export function Stats() {
       yAxis: { type: "value", ...axisCommon },
       tooltip: {
         trigger: "axis",
-        valueFormatter: (v) => `¥${v}`,
+        valueFormatter: (v) => `¥${formatMoneyCompact(Math.round(Number(v) * 100), locale)}`,
       },
       series: [
         {
@@ -245,7 +292,7 @@ export function Stats() {
         },
       ],
     };
-  }, [month, seriesByDay, dailyKind, axisCommon]);
+  }, [month, seriesByDay, dailyKind, axisCommon, locale]);
 
   const trendOption = useMemo<EChartsOption>(() => {
     const kindName =
@@ -258,7 +305,10 @@ export function Stats() {
       grid: { left: 44, right: 8, top: 24, bottom: 24 },
       xAxis: { type: "category", data: monthLabels, ...axisCommon },
       yAxis: { type: "value", ...axisCommon },
-      tooltip: { trigger: "axis", valueFormatter: (v) => `¥${v}` },
+      tooltip: {
+        trigger: "axis",
+        valueFormatter: (v) => `¥${formatMoneyCompact(Math.round(Number(v) * 100), locale)}`,
+      },
       legend: {
         bottom: 0,
         itemWidth: 10,
@@ -271,7 +321,7 @@ export function Stats() {
           name: kindName,
           type: "line",
           smooth: true,
-          data: monthlyTrend[dailyKind],
+          data: monthlyTrend[dailyKind].map((v) => v / 100),
           symbol: "circle",
           symbolSize: 5,
           lineStyle: { width: 2, color },
@@ -279,7 +329,7 @@ export function Stats() {
         },
       ],
     };
-  }, [monthlyTrend, axisCommon, ink3, t, dailyKind]);
+  }, [monthlyTrend, axisCommon, ink3, t, dailyKind, locale]);
 
   const totalKindCents = shares.reduce((s, x) => s + x.cents, 0);
   const catName = (c: Category) => (c.name_key ? t(c.name_key) : c.name);
@@ -307,7 +357,7 @@ export function Stats() {
       data.push({
         name: t("stats.other"),
         value: otherCents / 100,
-        itemStyle: { color: "#9AA0A6" },
+        itemStyle: { color: OTHER_COLOR },
       });
     }
     return {
@@ -348,6 +398,7 @@ export function Stats() {
     locale,
     centerLabel,
     t,
+    themeRevision,
   ]);
 
   /** 单击下钻：仅带未隐藏子分类的分类可下钻；下钻层的"本级"桶（自身）不可再进 */
@@ -398,7 +449,7 @@ export function Stats() {
         <div className="w-10" />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-8">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(2rem+env(safe-area-inset-bottom))]">
         {/* 月份 / 年份横滑条 */}
         <div className="flex gap-2 overflow-x-auto py-2">
           {mode === "monthly"
@@ -465,7 +516,7 @@ export function Stats() {
         {budgetExec && budgetExec.rows.length > 0 && (
           <section className="mt-3 rounded-2xl bg-card p-3">
             <div className="flex items-center justify-between">
-              <CardTitle text={t("stats.budgetExecution")} />
+              <CardTitle text={t("stats.budgetExecutionCurrent")} />
               <span className="text-[10px] text-ink-3">
                 {t("budget.cycleRange", {
                   from: budgetExec.cycle.from,
@@ -638,7 +689,10 @@ export function Stats() {
                   ))}
                   {!showAll && otherCents > 0 && (
                     <div className="flex items-center py-1">
-                      <span className="h-2 w-2 shrink-0 rounded-full bg-ink-3" />
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: OTHER_COLOR }}
+                      />
                       <div className="ml-2 flex min-w-0 flex-1 items-center gap-2">
                         <span className="min-w-0 flex-1 truncate text-xs text-ink">
                           {t("stats.other")}

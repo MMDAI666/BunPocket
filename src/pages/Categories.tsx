@@ -123,6 +123,11 @@ export function Categories() {
           });
         }
       } else if (sheet === "rename" && target) {
+        // 原样保存（未改名）不能清空 name_key，否则系统分类会丢本地化名与默认 SVG 图标
+        if (name === displayName(target)) {
+          closeSheet();
+          return;
+        }
         await updateCategory(target.id, { name, name_key: null });
       }
       closeSheet();
@@ -274,7 +279,7 @@ export function Categories() {
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto pb-8">
+      <div className="min-h-0 flex-1 overflow-y-auto pb-[calc(2rem+env(safe-area-inset-bottom))]">
         {failed ? (
           <div className="px-3">
             <ErrorState onRetry={() => void reload()} />

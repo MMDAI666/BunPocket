@@ -67,6 +67,7 @@ BunPocket/
 corepack pnpm build
 
 # 桌面端调试（Vite devServer + Tauri 窗口）
+# tauri.conf.json 的 beforeDevCommand/beforeBuildCommand 也写成 corepack pnpm ...，避免依赖全局 pnpm
 corepack pnpm tauri dev
 
 # 桌面端打包（msi/nsis 等）
@@ -148,15 +149,15 @@ corepack pnpm tauri android dev --host 127.0.0.1
 
 ## 备份与恢复语义
 
-- **主库**：`$APPCONFIG/bunpocket.db`（桌面为 `%APPDATA%\com.bunpocket.app`，Android 为应用私有 files 目录）。
+- **主库**：`$APPCONFIG/bunpocket.db`（桌面为 `%APPDATA%\com.bunpocket.app`，Android 为应用私有 dataDir）。
 - **备份目录**：`$APPCONFIG/backups/`。
 - **自动备份**：每天首次连库时触发；当天已有备份则跳过。**手动备份**："设置 → 数据备份 → 立即备份"。
 - **单个备份文件**：`backups/bunpocket-YYYYMMDD-HHmmss.db`。生成流程是先写 `*.db.partial` → `VACUUM INTO` 原子快照 → `PRAGMA integrity_check` + schema 版本校验 → rename 成正式文件名；进程被杀/断电只会留下 `.partial`，不会出现"看起来有效但已损坏"的最新备份。
 - **轮转**：保留最近 N 份（设置页 1–30，默认 7 份）。
-- **恢复来源**：自动选择"最新一份完整性校验通过、且 schema 版本不高于当前应用"的备份；来自更新版本的备份拒绝恢复（提示先升级应用）。
+- **恢复来源**：自动选择"最新一份完整性校验通过、schema 版本不高于当前应用、且迁移记录与当前构建兼容"的备份；来自更新版本或迁移 checksum 不一致的备份会被跳过（后者会在换库前拦住，避免换库成功后应用打不开）。
 - **恢复前快照**：每次恢复前自动把当前数据快照为 `backups/prerestore-<时间戳>.db`（只保留最近一份）。误恢复后可在设置页用"恢复前快照"回滚。
-- **同版本恢复（进程内）**：备份 copy 到 `bunpocket.db-restore-tmp` → 关闭 SQLite 连接池 → 主库 rename 为 `bunpocket.db.old` → 清理 `-wal/-shm/-journal` 残留 → tmp rename 为主库 → 刷新页面。`bunpocket.db.old` 会保留作人工回退副本，直到下一次恢复时被覆盖。
-- **旧版本备份恢复（两阶段）**：当前进程无法对旧 schema 跑迁移，因此先把备份 copy 到 `bunpocket.db.pending-restore` 并提示"完全退出应用后重新打开"；下次启动时 `src/main.tsx` 在打开数据库之前调用 `applyPendingRestore()`：校验 pending 文件完整性 → 主库换到 `.old` → pending 换入主库 → 由 sqlx 执行迁移完成升级。
+- **同版本恢复（进程内）**：备份 copy 到 `bunpocket.db-restore-tmp` → 关闭 SQLite 连接池 → 主库连同 `-wal/-shm/-journal` 成组 rename 为 `bunpocket.db.old*` → tmp rename 为主库 → 刷新页面。`bunpocket.db.old` 会保留作人工回退副本，直到下一次恢复时被覆盖。任一步失败会成组回滚，不会在误删 WAL 后留下不完整主库。
+- **旧版本备份恢复（两阶段）**：当前进程无法对旧 schema 跑迁移，因此先把备份 copy 到 `bunpocket.db.pending-restore`，并弹常驻提示要求"立即完全退出应用后重新打开"；下次启动时 `src/main.tsx` 在打开数据库之前调用 `applyPendingRestore()`：校验 pending 文件完整性 + 迁移记录 → **先把"当前主库"快照到 `backups/prerestore-<时间戳>.db`**（暂存后新记的账可从这里找回）→ 主库连同 sidecar 换到 `.old*` → pending 换入主库 → 由 sqlx 执行迁移完成升级。
 - 备份目录不会自动导出到外部存储；换机/重装前请手动把 `backups/` 拷出。
 
 ## 发布签名（Android release）
@@ -164,6 +165,8 @@ corepack pnpm tauri android dev --host 127.0.0.1
 1. 生成 keystore（**keystore 与密码禁止入库**，仓库 `.gitignore` 已忽略 `*.jks`/`*.keystore`）：
 
    ```pwsh
+   # 建议在 src-tauri/gen/android 目录内生成，storeFile 即可用相对路径
+   cd src-tauri/gen/android
    keytool -genkeypair -v -keystore bunpocket-release.jks -alias bunpocket `
      -keyalg RSA -keysize 2048 -validity 10000
    ```
@@ -177,11 +180,12 @@ corepack pnpm tauri android dev --host 127.0.0.1
    keyPassword=******
    ```
 
-   `storeFile` 可用绝对路径，或相对 `src-tauri/gen/android` 的路径。
+   `storeFile` 建议用相对 `src-tauri/gen/android` 的路径；若用绝对路径，请写正斜杠（`C:/Users/.../bunpocket-release.jks`）或双反斜杠——`keystore.properties` 由 Java `Properties.load` 读取，反斜杠会被当作转义符吞掉，非 ASCII 密码也可能乱码。四个字段缺任意一个时 release 保持未签名（构建可过但产物不能安装/上架）。
 
 3. 构建：`corepack pnpm tauri android build --apk`（或 `--aab`）。`app/build.gradle.kts` 检测到该文件且四个字段齐全时才创建 release `signingConfig` 并启用；文件缺失时 release 保持未签名（构建可过，但产物不能安装/上架），无需改代码。
 4. 密钥丢失将无法更新已发布版本；请离线备份 keystore 与密码。
-5. 首次从 debug 包切换到 release 签名包必须卸载重装（签名不同无法覆盖安装，会清数据）——切换前先手动备份并拷出 `backups/`。
+5. 发版前同步 bump `package.json` / `tauri.conf.json` / `Cargo.toml` 的 version（Android `versionCode` 由 Tauri 从 version 生成，重复 versionCode 会被应用商店拒绝）。
+6. 首次从 debug 包切换到 release 签名包必须卸载重装（签名不同无法覆盖安装，会清数据）——切换前先手动备份并拷出 `backups/`。
 
 ## 安全配置
 
@@ -194,15 +198,15 @@ corepack pnpm tauri android dev --host 127.0.0.1
   object-src 'none'; base-uri 'self'; frame-ancestors 'none'
   ```
 
-  Tauri 会在构建产物中为自身注入脚本自动加 nonce、为 HTML 内联脚本自动加 sha256，因此 `script-src 'self'` 下无需 `'unsafe-inline'`；`style-src` 因前端内联样式（Tailwind/组件样式）保留 `'unsafe-inline'`。
+  Tauri 构建期会为 HTML 内联脚本计算 sha256 并注入 CSP（Tauri 自身的初始化脚本走 WebView 注入、不受 CSP 管辖），因此 `script-src 'self'` 下无需 `'unsafe-inline'`；`style-src` 因前端内联样式（Tailwind/组件样式）保留 `'unsafe-inline'`。
 
-- **能力（capabilities/default.json）**：已移除 `opener:default`（当前无打开外链需求；后续需要时再单独引入插件与权限）。`fs` 写类权限（`fs:allow-copy-file`、`fs:allow-rename`、`fs:allow-remove`）的 scope 收窄到备份目录与主库相关文件：`$APPCONFIG/backups/**`（含目录本身）、`$APPCONFIG/bunpocket.db`、`bunpocket.db.old`、`bunpocket.db-restore-tmp`、`bunpocket.db.pending-restore`，以及恢复时清理的 `bunpocket.db-wal/-shm/-journal`。读取能力仍由 `fs:default` 提供的应用目录递归 scope 承担。
+- **能力（capabilities/default.json）**：已移除 `opener:default`（当前无打开外链需求；后续需要时再单独引入插件与权限）。备份/恢复用到的文件路径在 capability 中显式列出：`$APPCONFIG/backups/**`（含目录本身）、`$APPCONFIG/bunpocket.db`、`bunpocket.db.old`、`bunpocket.db-restore-tmp`、`bunpocket.db.pending-restore`，以及恢复时清理的 `bunpocket.db-wal/-shm/-journal`；读取能力由 `fs:default`（应用目录递归）承担。注意：`fs:default` 的全局 scope 会与命令 scope 取并集，因此这**不是**把 fs 彻底收窄到数据库文件，实际边界仍是"应用自己的数据目录"；本 App 无用户文件读写需求，后续如需更强隔离应移除 `fs:default` 并改为逐命令显式授权（需回归备份/恢复）。
 
 ## CI
 
 `.github/workflows/ci.yml` 单 job（Ubuntu）：
 
-checkout → Node 24（`actions/setup-node`）→ pnpm 12.18.0（`pnpm/action-setup@v4`，`package.json` 暂无 `packageManager` 字段，故在此显式固定版本）→ `pnpm install --frozen-lockfile` → `pnpm build` → 安装 Linux Tauri 依赖（libwebkit2gtk-4.1-dev、libgtk-3-dev、libayatana-appindicator3-dev、librsvg2-dev、patchelf）→ Rust stable（`dtolnay/rust-toolchain` + `Swatinem/rust-cache`）→ `cargo check --all-targets --manifest-path src-tauri/Cargo.toml`。
+checkout → Node 24（`actions/setup-node`）→ pnpm 12.18.0（`pnpm/action-setup@v4`，`package.json` 暂无 `packageManager` 字段，故在此显式固定版本）→ `pnpm install --frozen-lockfile` → `pnpm typecheck` → `pnpm build` → 安装 Linux Tauri 依赖（libwebkit2gtk-4.1-dev、libgtk-3-dev、libayatana-appindicator3-dev、libsoup-3.0-dev、libxdo-dev、librsvg2-dev、patchelf）→ Rust stable（`dtolnay/rust-toolchain` + `Swatinem/rust-cache`）→ `cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml`。
 
 CI 不构建 Android（需要签名与 NDK，且耗时），Android 产物由本地/发布流水线负责。
 
@@ -212,6 +216,9 @@ CI 不构建 Android（需要签名与 NDK，且耗时），Android 产物由本
 - 桌面端只有 Windows 验证过；Linux/macOS 未验证（CI 仅做 cargo check）。
 - iOS 未适配。
 - 备份恢复只支持"自动选最新一份可用备份"，不支持选择任意历史备份或导出为外部文件；换机需手动拷 `backups/`。
+- 日期选择不允许未来日期（保证账单列表/统计/预算口径一致）；已存在的历史未来账单仍会显示在列表中。
+- 账单列表按全历史分页加载（不是按月切换）；统计页的月份/年份选择器会覆盖到账本最早一笔账单。
+- 旧版本备份的两阶段恢复期间请立即重启；重启换库前会自动快照当前主库，但恢复请求之后的新记账仍会进入 `.old`/快照，而不是保留在新主库。
 - 桌面小组件只在 App 退到后台（`onPause`）时刷新，不是实时数据；数据库被加密/损坏时小组件显示"--"。
 - 单机单用户：无账号、无多账本、无云同步/协作。
 - CSP 仅在 `tauri build` 产物（Tauri 自定义协议资源）上注入生效；桌面端 `tauri dev` 直接加载 Vite devServer，开发态不受该 CSP 约束（Tauri 行为），发布前请以打包产物验证。

@@ -61,8 +61,10 @@ export function MonthCalendar({ value, onChange, locale }: MonthCalendarProps) {
     ) {
       return;
     }
+    const dateStr = `${y}-${pad2(m)}-${pad2(d)}`;
+    if (dateStr > todayStr) return; // 不允许未来日期（与列表/统计口径一致）
     setView({ year: y, month: m - 1 });
-    onChange(`${y}-${pad2(m)}-${pad2(d)}`);
+    onChange(dateStr);
     setJumpOpen(false);
   };
 
@@ -152,17 +154,21 @@ export function MonthCalendar({ value, onChange, locale }: MonthCalendarProps) {
           const dateStr = `${view.year}-${pad2(view.month + 1)}-${pad2(day)}`;
           const selected = dateStr === value;
           const isToday = dateStr === todayStr;
+          const isFuture = dateStr > todayStr;
           return (
             <button
               key={day}
               type="button"
+              disabled={isFuture}
               className={cn(
                 "mx-auto my-0.5 flex h-10 w-10 items-center justify-center rounded-full text-[15px]",
-                selected
-                  ? "bg-gradient-to-r from-brand-1 to-brand-2 font-semibold text-white"
-                  : isToday
-                    ? "font-semibold text-brand"
-                    : "text-ink",
+                isFuture
+                  ? "text-ink-3/40"
+                  : selected
+                    ? "bg-gradient-to-r from-brand-1 to-brand-2 font-semibold text-white"
+                    : isToday
+                      ? "font-semibold text-brand"
+                      : "text-ink",
               )}
               onClick={() => onChange(dateStr)}
             >

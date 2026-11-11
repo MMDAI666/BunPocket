@@ -8,6 +8,8 @@ import {
   useNavigate,
 } from "react-router-dom";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
+import { toast } from "./components/ui/Toast";
+import i18n from "./i18n";
 import { Home } from "./pages/Home";
 
 // 首屏只保留首页；其余页面按路由懒加载，避免 ECharts 等重依赖进入首包
@@ -101,7 +103,8 @@ function AnimatedRoutes() {
   const navigate = useNavigate();
   useDeepLinkNavigate(navigate);
   return (
-    <div key={location.pathname} className="page-in h-full">
+    // key 同时包含 search：/add?id=N → /add 这类同 pathname 的热深链也会重挂载、清掉旧表单
+    <div key={`${location.pathname}${location.search}`} className="page-in h-full">
       <Suspense fallback={<div className="h-full bg-page" />}>
         <Routes>
           <Route path="/" element={<Home />} />
@@ -119,6 +122,18 @@ function AnimatedRoutes() {
 }
 
 export default function App() {
+  // applyPendingRestore 在校验失败时会清掉 pending 并留下标记，这里在 UI 就绪后提示一次
+  useEffect(() => {
+    let flag: string | null = null;
+    try {
+      flag = localStorage.getItem("bp:restore-error");
+      if (flag) localStorage.removeItem("bp:restore-error");
+    } catch {
+      /* 隐私模式等场景忽略 */
+    }
+    if (flag) toast.show(i18n.t("backup.integrityFailed"), "error");
+  }, []);
+
   return (
     <HashRouter>
       <AnimatedRoutes />

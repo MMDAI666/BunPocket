@@ -41,6 +41,8 @@ export function Settings() {
   const [preRestoreCount, setPreRestoreCount] = useState(0);
   const [confirmRestore, setConfirmRestore] = useState(false);
   const [confirmPreRestore, setConfirmPreRestore] = useState(false);
+  /** 旧 schema 恢复已暂存 pending-restore：必须提示用户立即完全退出应用，否则期间新账会在重启换库时被覆盖 */
+  const [restartNotice, setRestartNotice] = useState(false);
   const [version, setVersion] = useState<string | null>(null);
   /** 备份/恢复是 IO 重操作（恢复还会换库文件）：全程加锁防重复触发 */
   const [backupBusy, setBackupBusy] = useState(false);
@@ -78,7 +80,7 @@ export function Settings() {
     void restore()
       .then((result) => {
         if (result === "restart-required") {
-          toast.show(t("backup.restartRequired"));
+          setRestartNotice(true);
         }
       })
       .catch((err: unknown) => {
@@ -87,7 +89,12 @@ export function Settings() {
           toast.show(t("backup.tooNew"), "error");
         } else if (code === "backup-version-mismatch") {
           toast.show(t("backup.versionMismatch"), "error");
-        } else if (code === "backup-integrity" || code === "backup-invalid") {
+        } else if (
+          code === "backup-integrity" ||
+          code === "backup-invalid" ||
+          code.startsWith("backup-migration-") ||
+          code === "backup-checksum-mismatch"
+        ) {
           toast.show(t("backup.integrityFailed"), "error");
         } else {
           toast.show(t("backup.failed"), "error");
@@ -117,7 +124,7 @@ export function Settings() {
         <div className="w-10" />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-8">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(2rem+env(safe-area-inset-bottom))]">
         <h2 className="px-1 pt-3 pb-2 text-sm font-bold text-ink">
           {t("settings.appearance")}
         </h2>
@@ -251,6 +258,26 @@ export function Settings() {
         >
           {t("common.ok")}
         </button>
+      </Sheet>
+
+      {/* 旧版本恢复已暂存：必须常驻提示，避免用户以为提示已过继续记账 */}
+      <Sheet
+        open={restartNotice}
+        onOpenChange={setRestartNotice}
+        title={t("backup.restartTitle")}
+        footer={
+          <button
+            type="button"
+            className="w-full rounded-full bg-gradient-to-r from-brand-1 to-brand-2 py-2.5 text-sm font-medium text-white"
+            onClick={() => setRestartNotice(false)}
+          >
+            {t("common.ok")}
+          </button>
+        }
+      >
+        <p className="px-1 py-2 text-sm leading-6 text-ink-2">
+          {t("backup.restartContent")}
+        </p>
       </Sheet>
 
       <Confirm

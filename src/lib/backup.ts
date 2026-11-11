@@ -132,6 +132,10 @@ async function verifyBackupAt(relativePath: string): Promise<number> {
     if (typeof version !== "number" || !Number.isInteger(version)) {
       throw new Error("backup-invalid");
     }
+    const failed = await db.select<{ n: number }[]>(
+      "SELECT COUNT(*) AS n FROM _sqlx_migrations WHERE success = 0",
+    );
+    if ((failed[0]?.n ?? 0) > 0) throw new Error("backup-migration-failed");
     return version;
   } catch (e) {
     if (e instanceof Error && e.message.startsWith("backup-")) throw e;
@@ -146,6 +150,55 @@ async function verifyBackupAt(relativePath: string): Promise<number> {
 
 async function verifyBackupFile(name: string): Promise<number> {
   return verifyBackupAt(`${BACKUP_DIR}/${name}`);
+}
+
+interface MigrationRow {
+  version: number;
+  checksum: string;
+  success: number;
+}
+
+/** 主库迁移记录（主库连接池已打开，不能 close） */
+async function currentMigrationRows(): Promise<MigrationRow[]> {
+  const db = await getDb();
+  return db.select<MigrationRow[]>(
+    "SELECT version, hex(checksum) AS checksum, success FROM _sqlx_migrations ORDER BY version",
+  );
+}
+
+/** 读取备份文件的迁移记录（独立 pool key，用完显式 close 该 key） */
+async function backupMigrationRows(relativePath: string): Promise<MigrationRow[]> {
+  let db: Database | null = null;
+  const key = `sqlite:${relativePath}`;
+  try {
+    db = await Database.load(key);
+    return await db.select<MigrationRow[]>(
+      "SELECT version, hex(checksum) AS checksum, success FROM _sqlx_migrations ORDER BY version",
+    );
+  } finally {
+    await db?.close(key).catch((e) => console.warn("close migration db failed:", e));
+  }
+}
+
+/**
+ * 恢复前校验备份的迁移记录与当前库兼容：
+ * - 备份里不能有 success=0 的失败迁移；
+ * - 备份已应用的每个版本，当前库必须已应用且 checksum 完全一致（sqlx 启动时同样会校验，
+ *   提前拦住可避免"换库成功但应用打不开"）。
+ */
+async function assertMigrationCompatible(name: string): Promise<void> {
+  const currentRows = await currentMigrationRows();
+  const current = new Map(currentRows.map((row) => [row.version, row.checksum]));
+  const backup = await backupMigrationRows(`${BACKUP_DIR}/${name}`);
+  if (backup.length === 0) throw new Error("backup-invalid");
+  for (const row of backup) {
+    if (!row.success) throw new Error("backup-migration-failed");
+    const currentChecksum = current.get(row.version);
+    if (!currentChecksum) throw new Error("backup-migration-unapplied");
+    if (currentChecksum.toLowerCase() !== row.checksum.toLowerCase()) {
+      throw new Error("backup-checksum-mismatch");
+    }
+  }
 }
 
 export async function verifyBackupVersion(name: string): Promise<number> {
@@ -298,49 +351,124 @@ export async function ensureDailyBackup(): Promise<void> {
   });
 }
 
-/** 把主库文件换到 .old、旧备份落到主库位置（进程内恢复，同 schema 版本适用） */
+/**
+ * 把 newFilePath 换到主库位置。主库与其 sidecar（-wal/-shm/-journal）成组移动到 `.old*`，
+ * 保证 `.old` 是一份完整可回退副本；换入失败时成组回滚。
+ */
+async function replaceMainDbFile(newFilePath: string): Promise<void> {
+  const dbPath = await dbFilePath();
+  const oldPath = `${dbPath}.old`;
+
+  // 清理上一份 .old：删除失败必须中止，不能带着旧 .old 继续换库
+  if (await exists(oldPath)) {
+    await remove(oldPath);
+  }
+
+  // 主库移走；文件不存在视为首次恢复
+  let movedMain = false;
+  try {
+    await rename(dbPath, oldPath);
+    movedMain = true;
+  } catch (e) {
+    if (await exists(dbPath)) throw e;
+  }
+
+  const suffixes = ["-wal", "-shm", "-journal"];
+  const movedSidecars: string[] = [];
+  if (movedMain) {
+    for (const suffix of suffixes) {
+      const current = `${dbPath}${suffix}`;
+      try {
+        if (await exists(current)) {
+          await rename(current, `${oldPath}${suffix}`);
+          movedSidecars.push(suffix);
+        }
+      } catch (e) {
+        console.warn("move db sidecar failed:", suffix, e);
+      }
+    }
+  }
+
+  try {
+    await rename(newFilePath, dbPath);
+  } catch (e) {
+    // 先恢复 sidecar，再恢复主库
+    for (const suffix of movedSidecars) {
+      try {
+        await rename(`${oldPath}${suffix}`, `${dbPath}${suffix}`);
+      } catch {
+        /* 尽力回滚 */
+      }
+    }
+    if (movedMain) {
+      try {
+        await rename(oldPath, dbPath);
+      } catch {
+        /* 尽力回滚 */
+      }
+    }
+    throw e;
+  }
+  // 故意保留 oldPath（含 sidecar）：下次恢复前一直留作人工回退副本
+}
+
+/** 进程内恢复：先复制到 tmp（主库仍打开），close 后整体换库 */
 async function swapMainDbWithBackup(name: string): Promise<void> {
   const dbPath = await dbFilePath();
   const src = await join(await backupDirPath(), name);
   const tmpPath = `${dbPath}-restore-tmp`;
-  const oldPath = `${dbPath}.old`;
-
+  try {
+    await remove(tmpPath);
+  } catch {
+    /* 无残留 */
+  }
   await copyFile(src, tmpPath);
   await closeDb();
-
   try {
-    await remove(oldPath);
-  } catch {
-    /* 无旧档 */
-  }
-  try {
-    await rename(dbPath, oldPath);
-  } catch {
-    /* 库文件可能不存在（首次运行即恢复） */
-  }
-  for (const suffix of ["-wal", "-shm", "-journal"]) {
-    try {
-      await remove(`${dbPath}${suffix}`);
-    } catch {
-      /* 无 sidecar 残留 */
-    }
-  }
-  try {
-    await rename(tmpPath, dbPath);
+    await replaceMainDbFile(tmpPath);
   } catch (e) {
     try {
-      await rename(oldPath, dbPath);
+      await remove(tmpPath);
     } catch {
-      /* 尽力回滚 */
+      /* 尽力清理 */
     }
     throw e;
   }
-  // 故意保留 oldPath：下次恢复前一直留作人工回退副本
+}
+
+/**
+ * 两阶段恢复真正执行前，把"当前主库"快照到备份目录（prerestore-*）。
+ * 暂存 pending 之后用户仍可能继续记账，这份快照保证那些数据在换库后仍可找回。
+ */
+async function snapshotCurrentDbBeforeApply(): Promise<void> {
+  const dbPath = await dbFilePath();
+  if (!(await exists(dbPath))) return;
+  const dir = await backupDirPath();
+  await mkdir(dir, { recursive: true });
+  const name = backupFileName(PRERESTORE_PREFIX);
+  const target = await join(dir, name);
+  await copyFile(dbPath, target);
+  // WAL/journal 若存在一并复制，SQLite 打开快照时会据此恢复；shm 可重建，不复制
+  for (const suffix of ["-wal", "-journal"]) {
+    try {
+      if (await exists(`${dbPath}${suffix}`)) {
+        await copyFile(`${dbPath}${suffix}`, `${target}${suffix}`);
+      }
+    } catch {
+      /* sidecar 复制失败不影响主库 */
+    }
+  }
+  try {
+    await verifyBackupFile(name);
+  } catch (e) {
+    console.warn("pre-apply snapshot invalid:", e);
+  }
 }
 
 /**
  * 应用启动时（打开 DB 之前）把上次准备好的 pending-restore 换入主库位置。
  * 旧 schema 备份需要新进程跑迁移，所以不能在当前进程用 reload 完成。
+ * 换库前会先快照"当前主库"，避免暂存 pending 之后新记的账在重启时静默丢失。
  */
 export async function applyPendingRestore(): Promise<boolean> {
   if (!isTauri) return false;
@@ -359,37 +487,28 @@ export async function applyPendingRestore(): Promise<boolean> {
     await verifyBackupAt(`bunpocket.db${PENDING_RESTORE_SUFFIX}`);
   } catch (e) {
     console.warn("pending restore file invalid, skipped:", e);
+    // 无效 pending 必须清掉，否则每次启动都重复校验；同时留标记让 UI 提示用户
+    try {
+      await remove(pendingPath);
+    } catch {
+      /* 忽略 */
+    }
+    try {
+      localStorage.setItem("bp:restore-error", "1");
+    } catch {
+      /* 忽略 */
+    }
     return false;
   }
 
-  const oldPath = `${dbPath}.old`;
+  // 暂存 pending 之后用户可能又记了账：换库前把当前主库快照到 prerestore-*
   try {
-    await remove(oldPath);
-  } catch {
-    /* 无旧档 */
-  }
-  try {
-    await rename(dbPath, oldPath);
-  } catch {
-    /* 库文件可能不存在 */
-  }
-  for (const suffix of ["-wal", "-shm", "-journal"]) {
-    try {
-      await remove(`${dbPath}${suffix}`);
-    } catch {
-      /* 无 sidecar 残留 */
-    }
-  }
-  try {
-    await rename(pendingPath, dbPath);
+    await snapshotCurrentDbBeforeApply();
   } catch (e) {
-    try {
-      await rename(oldPath, dbPath);
-    } catch {
-      /* 尽力回滚 */
-    }
-    throw e;
+    console.warn("snapshot current db before pending restore failed:", e);
   }
+
+  await replaceMainDbFile(pendingPath);
   return true;
 }
 
@@ -426,6 +545,8 @@ async function restoreCandidates(
         lastError = "backup-from-newer-version";
         continue;
       }
+      // 迁移 checksum/dirty 不兼容的备份直接跳过，避免换库后 sqlx 打不开
+      await assertMigrationCompatible(name);
       chosen = { name, version };
       break;
     } catch (e) {

@@ -64,7 +64,11 @@ export function NumberPad({
             <button
               key={i}
               type="button"
-              className="h-14 bg-card text-sm text-ink-2 active:bg-chip"
+              disabled={submitDisabled}
+              className={cn(
+                "h-14 bg-card text-sm text-ink-2 active:bg-chip",
+                submitDisabled && "opacity-40",
+              )}
               onClick={() => handle(key)}
             >
               {t("add.another")}

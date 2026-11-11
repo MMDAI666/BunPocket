@@ -12,10 +12,15 @@ BEGIN
   WHERE NEW.exclude_budget NOT IN (0, 1);
 
   SELECT RAISE(ABORT, 'bill.date must be a valid YYYY-MM-DD')
-  WHERE date(NEW.date) IS NULL OR date(NEW.date) <> NEW.date;
+  WHERE NEW.date IS NULL
+    OR NEW.date NOT GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'
+    OR date(NEW.date) IS NULL
+    OR date(NEW.date) <> NEW.date;
 
   SELECT RAISE(ABORT, 'bill.time must be a valid HH:MM')
-  WHERE time(NEW.time) IS NULL OR length(NEW.time) <> 5;
+  WHERE NEW.time IS NULL
+    OR NEW.time NOT GLOB '[0-2][0-9]:[0-5][0-9]'
+    OR CAST(substr(NEW.time, 1, 2) AS INTEGER) > 23;
 
   SELECT RAISE(ABORT, 'bill.kind must match category.kind')
   WHERE NEW.kind <> (SELECT kind FROM category WHERE id = NEW.category_id);
@@ -28,10 +33,15 @@ BEGIN
   WHERE NEW.exclude_budget NOT IN (0, 1);
 
   SELECT RAISE(ABORT, 'bill.date must be a valid YYYY-MM-DD')
-  WHERE date(NEW.date) IS NULL OR date(NEW.date) <> NEW.date;
+  WHERE NEW.date IS NULL
+    OR NEW.date NOT GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'
+    OR date(NEW.date) IS NULL
+    OR date(NEW.date) <> NEW.date;
 
   SELECT RAISE(ABORT, 'bill.time must be a valid HH:MM')
-  WHERE time(NEW.time) IS NULL OR length(NEW.time) <> 5;
+  WHERE NEW.time IS NULL
+    OR NEW.time NOT GLOB '[0-2][0-9]:[0-5][0-9]'
+    OR CAST(substr(NEW.time, 1, 2) AS INTEGER) > 23;
 
   SELECT RAISE(ABORT, 'bill.kind must match category.kind')
   WHERE NEW.kind <> (SELECT kind FROM category WHERE id = NEW.category_id);

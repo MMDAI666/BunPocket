@@ -74,9 +74,9 @@
     "viewAll": "查看全部",
     "collapse": "收起",
     "all": "全部",
-    "budgetExecution": "预算执行",
     "other": "其他",
-    "calendarMonths": "注：月份为自然月"
+    "calendarMonths": "注：月份为自然月",
+    "budgetExecutionCurrent": "预算执行（当前周期）"
   },
   "settings": {
     "title": "设置",
@@ -106,12 +106,13 @@
     "restoreContent": "将用最近备份覆盖当前数据；恢复前会自动保存一份当前数据快照",
     "versionMismatch": "备份版本与当前应用不一致，暂不支持恢复",
     "tooNew": "备份来自更新版本的应用，请先升级应用再恢复",
-    "restartRequired": "恢复已准备完成，请完全退出应用后重新打开，以完成数据替换和升级",
     "integrityFailed": "备份文件校验失败，已取消恢复",
     "done": "已备份",
     "failed": "操作失败",
     "noBackup": "暂无备份",
-    "none": "无"
+    "none": "无",
+    "restartTitle": "需要重启应用",
+    "restartContent": "旧版本备份已准备就绪。请现在完全退出并重新打开应用完成恢复；在重启前继续记账，这些新记录会被恢复流程覆盖（当前主库会先自动快照，可在“恢复前快照”中找回）。"
   },
   "categories": {
     "title": "分类管理",

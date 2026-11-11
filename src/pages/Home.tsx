@@ -255,9 +255,12 @@ export function Home() {
             onClick={() => navigate("/budget")}
             role="button"
             tabIndex={0}
-            onKeyDown={(e) =>
-              (e.key === "Enter" || e.key === " ") && navigate("/budget")
-            }
+            onKeyDown={(e) => {
+              if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                navigate("/budget");
+              }
+            }}
           >
             {loading || failed ? (
               <div className="py-2 text-center text-sm text-ink-3">…</div>
@@ -270,8 +273,14 @@ export function Home() {
                 <div className="relative shrink-0">
                   <ProgressRing progress={progress} size={56} stroke={5} />
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-xs font-semibold text-ink">
-                      {formatMoneyCompact(Math.max(remaining, 0), locale)}
+                    <span
+                      className={
+                        remaining < 0
+                          ? "text-xs font-semibold text-expense"
+                          : "text-xs font-semibold text-ink"
+                      }
+                    >
+                      {formatMoneyCompact(remaining, locale)}
                     </span>
                     <span className="text-[9px] text-ink-3">
                       {t("home.budgetRemaining")}
@@ -300,7 +309,7 @@ export function Home() {
       </header>
 
       {/* 内容区：最近记录（失败时保留页面外壳与导航入口） */}
-      <div className="flex-1 overflow-y-auto px-3 pt-4 pb-28">
+      <div className="flex-1 overflow-y-auto px-3 pt-4 pb-[calc(7rem+env(safe-area-inset-bottom))]">
         {failed ? (
           <ErrorState onRetry={() => setReloadKey((k) => k + 1)} />
         ) : loading ? (
@@ -432,7 +441,7 @@ export function Home() {
       {/* FAB */}
       <button
         type="button"
-        className="absolute bottom-6 left-1/2 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-full bg-gradient-to-r from-brand-1 to-brand-2 text-3xl font-light text-white shadow-lg shadow-brand-2/40 active:scale-95"
+        className="absolute bottom-[calc(1.5rem+env(safe-area-inset-bottom))] left-1/2 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-full bg-gradient-to-r from-brand-1 to-brand-2 text-3xl font-light text-white shadow-lg shadow-brand-2/40 active:scale-95"
         onClick={() => navigate("/add")}
         aria-label={t("nav.add")}
       >

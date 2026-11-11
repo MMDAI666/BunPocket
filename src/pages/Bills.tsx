@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import {
   type BillRow,
   type Category,
-  billsInDateRangePaged,
+  billsPage,
   dailyExpenseTotals,
   loadCategoryRows,
   searchBills,
@@ -15,18 +15,13 @@ import {
   findCategory,
   flattenCategoryTree,
 } from "../lib/category";
-import { formatMoneyCompact, todayStr, weekdayShort } from "../lib/format";
+import { formatMoneyCompact, weekdayShort } from "../lib/format";
 import { IconBadge } from "../components/ui/IconBadge";
 import { ErrorState } from "../components/ui/ErrorState";
 import { toast } from "../components/ui/Toast";
 import { useLocale } from "../hooks/useLocale";
 
 const PAGE_SIZE = 50;
-
-/** 列表模式的时间窗：去年 1 月 1 日至今（分页加载） */
-function defaultFrom(): string {
-  return `${new Date().getFullYear() - 1}-01-01`;
-}
 
 export function Bills() {
   const { t } = useTranslation();
@@ -112,7 +107,7 @@ export function Bills() {
       try {
         const rows = kw
           ? await searchBills(kw, matchCategoryIds(kw), PAGE_SIZE, 0)
-          : await billsInDateRangePaged(defaultFrom(), todayStr(), PAGE_SIZE, 0);
+          : await billsPage(PAGE_SIZE, 0);
         if (!alive || queryId !== queryIdRef.current) return;
         setBills(rows);
         setHasMore(rows.length === PAGE_SIZE);
@@ -160,12 +155,7 @@ export function Bills() {
       const kw = keyword.trim();
       const rows = kw
         ? await searchBills(kw, matchCategoryIds(kw), PAGE_SIZE, offset)
-        : await billsInDateRangePaged(
-            defaultFrom(),
-            todayStr(),
-            PAGE_SIZE,
-            offset,
-          );
+        : await billsPage(PAGE_SIZE, offset);
       if (queryId !== queryIdRef.current) return; // 查询已换代，丢弃旧分页
       setBills((prev) => [...(prev ?? []), ...rows]);
       setHasMore(rows.length === PAGE_SIZE);
@@ -214,7 +204,7 @@ export function Bills() {
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-8">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(2rem+env(safe-area-inset-bottom))]">
         {failed && <ErrorState onRetry={() => setReloadKey((k) => k + 1)} />}
         {!failed && bills === null && (
           <div className="py-10 text-center text-sm text-ink-3">…</div>

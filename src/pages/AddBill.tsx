@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAppBack } from "../hooks/useAppBack";
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
@@ -32,6 +32,7 @@ export function AddBill() {
   const { t } = useTranslation();
   const { locale } = useLocale();
   const navigate = useNavigate();
+  const location = useLocation();
   const goBack = useAppBack();
   const [searchParams] = useSearchParams();
   const editId = Number(searchParams.get("id")) || null;
@@ -108,6 +109,15 @@ export function AddBill() {
     setSelectedPath([]);
   };
 
+  /** 保存/删除后返回上一页；没有应用内历史时才 replace 回首页（避免历史栈出现两个 Home） */
+  const finish = () => {
+    if (location.key !== "default") {
+      navigate(-1);
+    } else {
+      navigate("/", { replace: true });
+    }
+  };
+
   const save = async (thenNew: boolean) => {
     if (saving) return;
     if (!current) {
@@ -124,7 +134,8 @@ export function AddBill() {
       kind,
       category_id: current.id,
       note: note.trim() || null,
-      exclude_budget: excludeBudget,
+      // 收入账单没有"不计入预算"语义，统一存 false
+      exclude_budget: kind === "expense" ? excludeBudget : false,
       date,
       time,
     };
@@ -141,7 +152,7 @@ export function AddBill() {
         toast.show(t("add.savedAndNew"));
       } else {
         toast.show(t("add.saved"));
-        navigate("/", { replace: true });
+        finish();
       }
     } catch {
       toast.show(t("common.saveFailed"), "error");
@@ -333,23 +344,26 @@ export function AddBill() {
           aria-label={t("add.notePlaceholder")}
           className="min-w-0 flex-1 rounded-full border border-line px-3 py-1.5 text-xs text-ink outline-none placeholder:text-ink-3 focus:border-brand"
         />
-        <button
-          type="button"
-          className={cn(
-            "shrink-0 rounded-full border px-3 py-1.5 text-xs",
-            excludeBudget
-              ? "border-brand bg-brand/10 font-medium text-brand"
-              : "border-line text-ink-3",
-          )}
-          onClick={() => setExcludeBudget((v) => !v)}
-        >
-          {t("add.excludeBudget")}
-        </button>
+        {kind === "expense" && (
+          <button
+            type="button"
+            className={cn(
+              "shrink-0 rounded-full border px-3 py-1.5 text-xs",
+              excludeBudget
+                ? "border-brand bg-brand/10 font-medium text-brand"
+                : "border-line text-ink-3",
+            )}
+            aria-pressed={excludeBudget}
+            onClick={() => setExcludeBudget((v) => !v)}
+          >
+            {t("add.excludeBudget")}
+          </button>
+        )}
       </div>
 
       {/* 备注历史（备注为空时给出最近用过的备注；onMouseDown 阻止点击瞬间失焦带来的移动端/桌面端行为差异） */}
       {note === "" && noteSuggestions.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 px-4 pb-1">
+        <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto px-4 pb-1">
           {noteSuggestions.map((suggestion) => (
             <button
               key={suggestion}
@@ -411,7 +425,7 @@ export function AddBill() {
           if (editId) {
             setSaving(true);
             void deleteBill(editId)
-              .then(() => navigate("/", { replace: true }))
+              .then(() => finish())
               .catch(() => {
                 setSaving(false);
                 toast.show(t("common.deleteFailed"), "error");
