@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useAppBack } from "../hooks/useAppBack";
+import { useAppNavigate } from "../hooks/useAppNavigate";
 import { useTranslation } from "react-i18next";
+import { Search, X } from "lucide-react";
 import {
   type BillRow,
   type Category,
@@ -15,9 +16,13 @@ import {
   findCategory,
   flattenCategoryTree,
 } from "../lib/category";
-import { formatMoneyCompact, weekdayShort } from "../lib/format";
+import { formatMoneyCompact, monthDayLabel, weekdayShort } from "../lib/format";
+import { errorMessage, logEvent } from "../lib/logger";
+import { cn } from "../lib/cn";
 import { IconBadge } from "../components/ui/IconBadge";
 import { ErrorState } from "../components/ui/ErrorState";
+import { PageHeader } from "../components/ui/PageHeader";
+import { BrandMark } from "../components/BrandMark";
 import { toast } from "../components/ui/Toast";
 import { useLocale } from "../hooks/useLocale";
 
@@ -26,7 +31,7 @@ const PAGE_SIZE = 50;
 export function Bills() {
   const { t } = useTranslation();
   const { locale } = useLocale();
-  const navigate = useNavigate();
+  const navigate = useAppNavigate();
   const goBack = useAppBack();
   const [keyword, setKeyword] = useState("");
   const [bills, setBills] = useState<BillRow[] | null>(null);
@@ -111,8 +116,14 @@ export function Bills() {
         if (!alive || queryId !== queryIdRef.current) return;
         setBills(rows);
         setHasMore(rows.length === PAGE_SIZE);
-      } catch {
-        if (alive && queryId === queryIdRef.current) setFailed(true);
+      } catch (error) {
+        if (alive && queryId === queryIdRef.current) {
+          setFailed(true);
+          void logEvent("error", "bills.load.failed", {
+            keyword: kw,
+            message: errorMessage(error),
+          });
+        }
       }
     }, 300);
     return () => {
@@ -159,7 +170,12 @@ export function Bills() {
       if (queryId !== queryIdRef.current) return; // 查询已换代，丢弃旧分页
       setBills((prev) => [...(prev ?? []), ...rows]);
       setHasMore(rows.length === PAGE_SIZE);
-    } catch {
+    } catch (error) {
+      void logEvent("error", "bills.loadMore.failed", {
+        keyword: keyword.trim(),
+        offset,
+        message: errorMessage(error),
+      });
       toast.show(t("common.loadFailed"), "error");
     } finally {
       setLoadingMore(false);
@@ -186,97 +202,125 @@ export function Bills() {
 
   return (
     <div className="flex h-full flex-col bg-page">
-      <div className="flex items-center gap-2 px-2 pt-[max(env(safe-area-inset-top),0.5rem)] pb-2">
-        <button
-          type="button"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xl text-ink active:bg-chip"
-          onClick={goBack}
-          aria-label={t("common.back")}
-        >
-          ‹
-        </button>
-        <input
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          placeholder={t("bills.searchPlaceholder")}
-          aria-label={t("bills.searchPlaceholder")}
-          className="h-9 min-w-0 flex-1 rounded-full bg-chip px-4 text-sm text-ink outline-none placeholder:text-ink-3"
-        />
+      <PageHeader title={t("bills.title")} onBack={goBack} />
+
+      <div className="px-3 pb-2 pt-1">
+        <div className="flex items-center gap-2 rounded-[10px] border border-line bg-card px-3 py-2 transition-colors focus-within:border-brand">
+          <Search size={16} strokeWidth={1.9} className="shrink-0 text-ink-3" />
+          <input
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            placeholder={t("bills.searchPlaceholder")}
+            aria-label={t("bills.searchPlaceholder")}
+            className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
+          />
+          {keyword !== "" && (
+            <button
+              type="button"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-chip"
+              onClick={() => setKeyword("")}
+              aria-label={t("common.close")}
+            >
+              <X size={14} strokeWidth={1.9} />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(2rem+env(safe-area-inset-bottom))]">
         {failed && <ErrorState onRetry={() => setReloadKey((k) => k + 1)} />}
         {!failed && bills === null && (
-          <div className="py-10 text-center text-sm text-ink-3">…</div>
+          <div className="paper py-12 text-center text-[13px] text-ink-3">…</div>
         )}
         {!failed && bills !== null && groups.length === 0 && (
-          <div className="py-10 text-center text-sm text-ink-3">
-            {t("common.empty")}
+          <div className="paper flex flex-col items-center gap-2 px-6 py-10 text-center">
+            <BrandMark className="h-9 w-9 text-ink-3" />
+            <div className="text-[13px] text-ink-3">
+              {keyword.trim() !== "" ? t("bills.empty") : t("common.empty")}
+            </div>
           </div>
         )}
-        {!failed &&
-          groups.map((group) => (
-            <div key={group.date} className="mt-2">
-              <div className="flex justify-between px-1 py-1 text-xs text-ink-3">
-                <span>
-                  {group.date} {weekdayShort(group.date, locale)}
-                </span>
-                <span>
-                  {t("home.dayExpense")}:{" "}
-                  {formatMoneyCompact(group.expenseCents, locale)}
-                </span>
-              </div>
-              <div className="divide-y divide-gray-100 rounded-2xl bg-card dark:divide-white/5">
-                {group.bills.map((bill) => {
-                  const cat = findCategory(categories, bill.category_id);
-                  return (
-                    <button
-                      key={bill.id}
-                      type="button"
-                      className="flex w-full items-center px-3 py-2.5 text-left active:bg-chip"
-                      onClick={() => navigate(`/add?id=${bill.id}`)}
-                    >
-                      <IconBadge
-                        icon={cat?.icon}
-                        iconImage={cat?.icon_image}
-                        nameKey={cat?.name_key}
-                        iconType={cat?.icon_type}
-                      />
-                      <div className="ml-3 min-w-0 flex-1">
-                        <div className="truncate text-[15px] text-ink">
-                          {cat
-                            ? cat.name_key
-                              ? t(cat.name_key)
-                              : cat.name
-                            : "—"}
-                        </div>
-                        {bill.note && (
-                          <div className="truncate text-xs text-ink-3">
-                            {bill.note}
-                          </div>
-                        )}
-                      </div>
-                      <span
-                        className={
-                          bill.kind === "expense"
-                            ? "ml-3 text-[15px] text-expense"
-                            : "ml-3 text-[15px] text-income"
-                        }
+        {!failed && groups.length > 0 && (
+          <div className="paper overflow-hidden">
+            {groups.map((group, index) => (
+              <section key={group.date}>
+                <div
+                  className={cn(
+                    "flex items-center justify-between bg-chip/50 px-3 py-1.5",
+                    index > 0 && "border-t border-line",
+                  )}
+                >
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-[12px] font-medium text-ink">
+                      {monthDayLabel(group.date, locale)}
+                    </span>
+                    <span className="text-[10px] text-ink-3">
+                      {weekdayShort(group.date, locale)}
+                    </span>
+                  </div>
+                  <span className="num text-[11px] text-ink-3">
+                    {t("home.dayExpense")}{" "}
+                    {formatMoneyCompact(group.expenseCents, locale)}
+                  </span>
+                </div>
+                <div className="divide-y divide-line">
+                  {group.bills.map((bill) => {
+                    const cat = findCategory(categories, bill.category_id);
+                    return (
+                      <button
+                        key={bill.id}
+                        type="button"
+                        className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-chip/50 active:bg-chip"
+                        onClick={() => navigate(`/bill/${bill.id}`)}
                       >
-                        {bill.kind === "expense" ? "-" : "+"}
-                        {formatMoneyCompact(bill.amount_cents, locale)}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+                        <span className="num w-8 shrink-0 text-[10px] text-ink-3">
+                          {bill.time}
+                        </span>
+                        <IconBadge
+                          icon={cat?.icon}
+                          iconImage={cat?.icon_image}
+                          nameKey={cat?.name_key}
+                          iconType={cat?.icon_type}
+                          size="sm"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[14px] text-ink">
+                            {cat
+                              ? cat.name_key
+                                ? t(cat.name_key)
+                                : cat.name
+                              : "—"}
+                          </span>
+                          {bill.note && (
+                            <span className="block truncate text-[11px] text-ink-3">
+                              {bill.note}
+                            </span>
+                          )}
+                        </span>
+                        <span
+                          className={cn(
+                            "num ml-1 shrink-0 text-[14px] font-medium",
+                            bill.kind === "expense"
+                              ? "text-expense"
+                              : "text-income",
+                          )}
+                        >
+                          {bill.kind === "expense" ? "-" : "+"}
+                          {formatMoneyCompact(bill.amount_cents, locale)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
         {!failed && hasMore && (
           <button
             type="button"
             disabled={loadingMore}
-            className="mt-3 w-full rounded-2xl border border-dashed border-line py-2.5 text-sm text-ink-2 active:bg-chip disabled:opacity-50"
+            className="mt-3 w-full rounded-[10px] border border-line bg-card py-2.5 text-[12px] text-ink-2 transition-colors hover:bg-chip active:bg-chip disabled:opacity-50"
             onClick={() => void loadMore()}
           >
             {loadingMore ? "…" : t("common.loadMore")}

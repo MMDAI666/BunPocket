@@ -16,16 +16,16 @@ export function EmojiPicker({ onPick }: EmojiPickerProps) {
 
   return (
     <div>
-      <div className="-mx-4 mb-2 flex gap-2 overflow-x-auto px-4 pb-1">
+      <div className="-mx-5 mb-2 flex gap-1.5 overflow-x-auto px-5 pb-1">
         {EMOJI_GROUPS.map((g) => (
           <button
             key={g.key}
             type="button"
             className={cn(
-              "shrink-0 rounded-full px-3 py-1 text-xs whitespace-nowrap",
+              "shrink-0 rounded-[8px] px-2.5 py-1 text-[11px] whitespace-nowrap transition-colors",
               g.key === group
-                ? "bg-chip font-medium text-ink"
-                : "text-ink-3",
+                ? "bg-brand-soft font-medium text-brand"
+                : "text-ink-3 hover:bg-chip",
             )}
             onClick={() => setGroup(g.key)}
           >
@@ -38,7 +38,7 @@ export function EmojiPicker({ onPick }: EmojiPickerProps) {
           <button
             key={`${emoji}-${i}`}
             type="button"
-            className="flex h-11 items-center justify-center text-2xl active:scale-90"
+            className="flex h-11 items-center justify-center rounded-[10px] text-2xl transition-colors hover:bg-chip active:scale-90"
             onClick={() => onPick(emoji)}
           >
             {emoji}

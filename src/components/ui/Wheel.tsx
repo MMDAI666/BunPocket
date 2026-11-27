@@ -67,7 +67,7 @@ export function Wheel<T extends string | number>({
   return (
     <div className="relative" style={{ height }}>
       <div
-        className="pointer-events-none absolute inset-x-0 top-1/2 z-10 -translate-y-1/2 border-y border-line"
+        className="pointer-events-none absolute inset-x-0 top-1/2 z-10 -translate-y-1/2 rounded-[10px] border-y border-line"
         style={{ height: itemHeight }}
       />
       <div
@@ -86,7 +86,7 @@ export function Wheel<T extends string | number>({
             className={cn(
               "flex items-center justify-center transition-colors",
               i === selectedIndex
-                ? "text-base font-semibold text-ink"
+                ? "text-[15px] font-semibold text-ink"
                 : "text-ink-3",
             )}
             style={{ height: itemHeight, scrollSnapAlign: "center" }}

@@ -1,11 +1,17 @@
 import Database from "@tauri-apps/plugin-sql";
+import {
+  dateStrFromMs,
+  nextLocalDayStartMs,
+  startOfLocalDayMs,
+  timeStrFromMs,
+} from "./lib/format";
 
 // 只能在 Tauri 环境中调用（真机/模拟器/桌面端），纯浏览器中会失败；
 // 迁移由 Rust 侧 add_migrations 注册，Database.load 时自动执行。
 
 export type BillKind = "expense" | "income";
 
-/** 分类图标类型：auto=系统分类用图标库/自定义分类用 emoji；emoji=强制显示 icon；image=显示 icon_image */
+/** 分类图标类型：auto=系统分类默认 emoji（icon 为空才回退图标库）/自定义分类 emoji；emoji=强制显示 icon；image=显示 icon_image */
 export type IconType = "auto" | "emoji" | "image";
 
 export interface CategoryRow {
@@ -27,16 +33,23 @@ export interface Category extends CategoryRow {
   children: Category[];
 }
 
-export interface BillRow {
+interface BillRecord {
   id: number;
   amount_cents: number;
   kind: BillKind;
   category_id: number;
   note: string | null;
   exclude_budget: number;
+  /** UTC epoch ms；唯一时间源，显示/分组按设备本地时区 */
+  occurred_at_ms: number;
+  created_at_ms: number;
+}
+
+export interface BillRow extends BillRecord {
+  /** 由 occurred_at_ms 派生的本地日期，供页面显示/分组 */
   date: string;
+  /** 由 occurred_at_ms 派生的本地时间 HH:MM */
   time: string;
-  created_at: string;
 }
 
 export interface NewBill {
@@ -45,8 +58,17 @@ export interface NewBill {
   category_id: number;
   note: string | null;
   exclude_budget: boolean;
-  date: string;
-  time: string;
+  /** UTC epoch ms；新增/编辑时由本地日期时间换算 */
+  occurred_at_ms: number;
+}
+
+/** DB 行 → 页面行：date/time 从毫秒派生，数据库不再存这两个字段 */
+function toBillRow(row: BillRecord): BillRow {
+  return {
+    ...row,
+    date: dateStrFromMs(row.occurred_at_ms),
+    time: timeStrFromMs(row.occurred_at_ms),
+  };
 }
 
 let dbPromise: Promise<Database> | null = null;
@@ -118,6 +140,33 @@ export async function updateCategory(
   );
 }
 
+/**
+ * 同级重排：把同一父级（null=一级）下 orderedIds 的 sort 依次重写为 1..n。
+ * 单条 UPDATE + CASE 完成：tauri-plugin-sql 的连接池不保证多次 execute 落在同一连接，
+ * 所以不用 BEGIN/COMMIT，改由一条语句保证原子性；WHERE 限定父级，跨父级 id 写不进去。
+ * 不在 orderedIds 里的兄弟保持原 sort，因此调用方必须传该组完整顺序。
+ */
+export async function reorderCategoryGroup(
+  parentId: number | null,
+  orderedIds: number[],
+): Promise<void> {
+  if (orderedIds.length === 0) return;
+  const params: unknown[] = [];
+  const cases: string[] = [];
+  for (let i = 0; i < orderedIds.length; i += 1) {
+    params.push(orderedIds[i]);
+    cases.push(`WHEN $${params.length} THEN ${i + 1}`);
+  }
+  const placeholders = orderedIds.map((_, i) => `$${i + 1}`).join(", ");
+  params.push(parentId);
+  const database = await getDb();
+  await database.execute(
+    `UPDATE category SET sort = CASE id ${cases.join(" ")} END
+     WHERE parent_id IS $${params.length} AND id IN (${placeholders})`,
+    params,
+  );
+}
+
 /** 删除前检查：返回 null 表示可删，否则返回拒绝原因 */
 export async function categoryDeleteBlocker(id: number): Promise<"children" | "bills" | null> {
   const database = await getDb();
@@ -147,7 +196,7 @@ export async function deleteCategory(id: number): Promise<void> {
 export async function insertBill(bill: NewBill): Promise<number> {
   const database = await getDb();
   const result = await database.execute(
-    `INSERT INTO bill (amount_cents, kind, category_id, note, exclude_budget, date, time)
+    `INSERT INTO bill (amount_cents, kind, category_id, note, exclude_budget, occurred_at_ms, created_at_ms)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [
       bill.amount_cents,
@@ -155,8 +204,8 @@ export async function insertBill(bill: NewBill): Promise<number> {
       bill.category_id,
       bill.note,
       bill.exclude_budget ? 1 : 0,
-      bill.date,
-      bill.time,
+      bill.occurred_at_ms,
+      Date.now(),
     ],
   );
   return result.lastInsertId ?? 0;
@@ -166,15 +215,14 @@ export async function updateBill(id: number, bill: NewBill): Promise<void> {
   const database = await getDb();
   await database.execute(
     `UPDATE bill SET amount_cents = $1, kind = $2, category_id = $3, note = $4,
-       exclude_budget = $5, date = $6, time = $7 WHERE id = $8`,
+       exclude_budget = $5, occurred_at_ms = $6 WHERE id = $7`,
     [
       bill.amount_cents,
       bill.kind,
       bill.category_id,
       bill.note,
       bill.exclude_budget ? 1 : 0,
-      bill.date,
-      bill.time,
+      bill.occurred_at_ms,
       id,
     ],
   );
@@ -187,19 +235,20 @@ export async function deleteBill(id: number): Promise<void> {
 
 export async function getBill(id: number): Promise<BillRow | null> {
   const database = await getDb();
-  const rows = await database.select<BillRow[]>(
+  const rows = await database.select<BillRecord[]>(
     "SELECT * FROM bill WHERE id = $1",
     [id],
   );
-  return rows[0] ?? null;
+  return rows[0] ? toBillRow(rows[0]) : null;
 }
 
 export async function recentBills(limit = 20): Promise<BillRow[]> {
   const database = await getDb();
-  return database.select<BillRow[]>(
-    "SELECT * FROM bill ORDER BY date DESC, time DESC, id DESC LIMIT $1",
+  const rows = await database.select<BillRecord[]>(
+    "SELECT * FROM bill ORDER BY occurred_at_ms DESC, id DESC LIMIT $1",
     [limit],
   );
+  return rows.map(toBillRow);
 }
 
 export async function billsInDateRange(
@@ -207,10 +256,12 @@ export async function billsInDateRange(
   dateTo: string,
 ): Promise<BillRow[]> {
   const database = await getDb();
-  return database.select<BillRow[]>(
-    "SELECT * FROM bill WHERE date >= $1 AND date <= $2 ORDER BY date DESC, time DESC, id DESC",
-    [dateFrom, dateTo],
+  const rows = await database.select<BillRecord[]>(
+    `SELECT * FROM bill WHERE occurred_at_ms >= $1 AND occurred_at_ms < $2
+     ORDER BY occurred_at_ms DESC, id DESC`,
+    [startOfLocalDayMs(dateFrom), nextLocalDayStartMs(dateTo)],
   );
+  return rows.map(toBillRow);
 }
 
 /** 分页版流水（Bills 页"加载更多"用） */
@@ -221,11 +272,17 @@ export async function billsInDateRangePaged(
   offset: number,
 ): Promise<BillRow[]> {
   const database = await getDb();
-  return database.select<BillRow[]>(
-    `SELECT * FROM bill WHERE date >= $1 AND date <= $2
-     ORDER BY date DESC, time DESC, id DESC LIMIT $3 OFFSET $4`,
-    [dateFrom, dateTo, limit, offset],
+  const rows = await database.select<BillRecord[]>(
+    `SELECT * FROM bill WHERE occurred_at_ms >= $1 AND occurred_at_ms < $2
+     ORDER BY occurred_at_ms DESC, id DESC LIMIT $3 OFFSET $4`,
+    [
+      startOfLocalDayMs(dateFrom),
+      nextLocalDayStartMs(dateTo),
+      limit,
+      offset,
+    ],
   );
+  return rows.map(toBillRow);
 }
 
 /** 全历史分页（不限起始日期）：列表页"加载更多"可到达任意旧账 */
@@ -234,20 +291,22 @@ export async function billsPage(
   offset: number,
 ): Promise<BillRow[]> {
   const database = await getDb();
-  return database.select<BillRow[]>(
-    `SELECT * FROM bill ORDER BY date DESC, time DESC, id DESC
+  const rows = await database.select<BillRecord[]>(
+    `SELECT * FROM bill ORDER BY occurred_at_ms DESC, id DESC
      LIMIT $1 OFFSET $2`,
     [limit, offset],
   );
+  return rows.map(toBillRow);
 }
 
-/** 账本最早账单日期（统计页月份/年份选择器的下界） */
+/** 账本最早账单日期（统计页月份/年份选择器的下界）；按设备本地日期换算 */
 export async function earliestBillDate(): Promise<string | null> {
   const database = await getDb();
-  const rows = await database.select<{ date: string | null }[]>(
-    "SELECT MIN(date) AS date FROM bill",
+  const rows = await database.select<{ ms: number | null }[]>(
+    "SELECT MIN(occurred_at_ms) AS ms FROM bill",
   );
-  return rows[0]?.date ?? null;
+  const ms = rows[0]?.ms;
+  return typeof ms === "number" ? dateStrFromMs(ms) : null;
 }
 
 /** 某区间内按日的支出合计（Home 日头展示用，避免用最近 N 条账单近似） */
@@ -257,10 +316,12 @@ export async function dailyExpenseTotals(
 ): Promise<{ date: string; total: number }[]> {
   const database = await getDb();
   return database.select<{ date: string; total: number }[]>(
-    `SELECT date, SUM(amount_cents) AS total FROM bill
-     WHERE kind = 'expense' AND date >= $1 AND date <= $2
+    `SELECT date(occurred_at_ms / 1000, 'unixepoch', 'localtime') AS date,
+            SUM(amount_cents) AS total
+     FROM bill
+     WHERE kind = 'expense' AND occurred_at_ms >= $1 AND occurred_at_ms < $2
      GROUP BY date`,
-    [dateFrom, dateTo],
+    [startOfLocalDayMs(dateFrom), nextLocalDayStartMs(dateTo)],
   );
 }
 
@@ -291,25 +352,84 @@ export async function searchBills(
     categoryClause = ` OR b.category_id IN (${placeholders.join(", ")})`;
   }
   params.push(limit, offset);
-  return database.select<BillRow[]>(
+  const rows = await database.select<BillRecord[]>(
     `SELECT b.* FROM bill b JOIN category c ON c.id = b.category_id
      WHERE b.note LIKE $1 ESCAPE '\\' OR c.name LIKE $1 ESCAPE '\\'${categoryClause}
-     ORDER BY b.date DESC, b.time DESC, b.id DESC
+     ORDER BY b.occurred_at_ms DESC, b.id DESC
      LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params,
   );
+  return rows.map(toBillRow);
 }
 
-export async function recentNotes(limit = 10): Promise<string[]> {
+/**
+ * 某分类下最近用过的备注（只按分类本身，不含子分类）。
+ * 先多取一些再排除用户粉碎掉的标签，避免隐藏项占满结果。
+ */
+export async function recentNotesByCategory(
+  categoryId: number,
+  limit = 8,
+  exclude: string[] = [],
+): Promise<string[]> {
   const database = await getDb();
   const rows = await database.select<{ note: string }[]>(
     `SELECT note FROM bill
-     WHERE note IS NOT NULL AND note != ''
+     WHERE category_id = $1 AND note IS NOT NULL AND note != ''
      GROUP BY note
-     ORDER BY MAX(created_at) DESC LIMIT $1`,
-    [limit],
+     ORDER BY MAX(created_at_ms) DESC LIMIT 50`,
+    [categoryId],
   );
-  return rows.map((r) => r.note);
+  const blocked = new Set(exclude);
+  return rows
+    .map((r) => r.note)
+    .filter((note) => !blocked.has(note))
+    .slice(0, limit);
+}
+
+export interface BillsSummary {
+  count: number;
+  firstDate: string | null;
+  lastDate: string | null;
+  /** 最近若干天的每日笔数（日期倒序） */
+  recentDays: { date: string; count: number }[];
+}
+
+/** 供运行日志做启动快照：总量、时间跨度、最近几天笔数，用于事后核对数据是否减少 */
+export async function billsSummary(recentDayCount = 8): Promise<BillsSummary> {
+  const database = await getDb();
+  const agg = await database.select<{
+    n: number;
+    first: number | null;
+    last: number | null;
+  }[]>(
+    "SELECT COUNT(*) AS n, MIN(occurred_at_ms) AS first, MAX(occurred_at_ms) AS last FROM bill",
+  );
+  const row = agg[0];
+  const days = await database.select<{ date: string; n: number }[]>(
+    `SELECT date(occurred_at_ms / 1000, 'unixepoch', 'localtime') AS date,
+            COUNT(*) AS n
+     FROM bill
+     GROUP BY date
+     ORDER BY date DESC
+     LIMIT $1`,
+    [recentDayCount],
+  );
+  return {
+    count: row?.n ?? 0,
+    firstDate:
+      typeof row?.first === "number" ? dateStrFromMs(row.first) : null,
+    lastDate: typeof row?.last === "number" ? dateStrFromMs(row.last) : null,
+    recentDays: days.map((d) => ({ date: d.date, count: d.n })),
+  };
+}
+
+/** 当前主库已应用的最新迁移版本（运行日志诊断用） */
+export async function schemaVersion(): Promise<number | null> {
+  const database = await getDb();
+  const rows = await database.select<{ version: number | null }[]>(
+    "SELECT MAX(version) AS version FROM _sqlx_migrations",
+  );
+  return rows[0]?.version ?? null;
 }
 
 // ---------- 预算 ----------

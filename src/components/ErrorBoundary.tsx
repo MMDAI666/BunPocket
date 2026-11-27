@@ -1,5 +1,6 @@
-import { Component, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode } from "react";
 import i18n from "../i18n";
+import { errorMessage, logEvent } from "../lib/logger";
 
 interface Props {
   children: ReactNode;
@@ -17,6 +18,13 @@ export class ErrorBoundary extends Component<Props, State> {
     return { hasError: true };
   }
 
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    void logEvent("error", "app.crash", {
+      message: errorMessage(error),
+      componentStack: (info.componentStack ?? "").slice(0, 800),
+    });
+  }
+
   render() {
     if (!this.state.hasError) return this.props.children;
     return (
@@ -29,7 +37,7 @@ export class ErrorBoundary extends Component<Props, State> {
         </div>
         <button
           type="button"
-          className="rounded-full bg-gradient-to-r from-brand-1 to-brand-2 px-5 py-2 text-sm font-medium text-white"
+          className="rounded-[10px] bg-book px-5 py-2 text-sm font-medium text-cream"
           onClick={() => {
             // 先回首页再重载：避免确定性页面崩溃时 reload 回到同一路由反复崩溃
             window.location.hash = "#/";

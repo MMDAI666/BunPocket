@@ -10,13 +10,13 @@ interface ErrorStateProps {
 export function ErrorState({ onRetry }: ErrorStateProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-2xl bg-card px-6 py-10 text-center">
-      <CircleAlert size={26} className="text-ink-3" />
-      <div className="text-sm text-ink-2">{t("common.loadFailed")}</div>
+    <div className="paper flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+      <CircleAlert size={24} strokeWidth={1.7} className="text-ink-3" />
+      <div className="text-[13px] text-ink-2">{t("common.loadFailed")}</div>
       {onRetry && (
         <button
           type="button"
-          className="rounded-full border border-line px-4 py-1.5 text-sm text-ink-2 active:bg-chip"
+          className="rounded-[9px] border border-line px-4 py-1.5 text-[13px] text-ink-2 transition-colors hover:bg-chip active:bg-chip"
           onClick={onRetry}
         >
           {t("common.retry")}

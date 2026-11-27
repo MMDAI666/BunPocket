@@ -12,11 +12,14 @@
     "fs:allow-copy-file",
     "fs:allow-rename",
     "fs:allow-remove",
+    "fs:allow-write-text-file",
     {
       "identifier": "fs:scope",
       "allow": [
         "$APPCONFIG/backups",
         "$APPCONFIG/backups/**",
+        "$APPCONFIG/logs",
+        "$APPCONFIG/logs/**",
         "$APPCONFIG/bunpocket.db",
         "$APPCONFIG/bunpocket.db.old",
         "$APPCONFIG/bunpocket.db-restore-tmp",

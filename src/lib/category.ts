@@ -54,6 +54,41 @@ export function flattenCategoryTree(
 }
 
 /**
+ * 同级重排的乐观更新：把 orderedIds 的顺序套到目标分组里。
+ * 不属于该组的节点留在原槽位（一级数组里支出/收入按 kind 交错存放，只调其中一组）；
+ * 目标分组里没出现在 orderedIds 的节点也留在原槽位。引用不变时返回原数组，便于跳过重渲染。
+ */
+export function applySiblingOrder(
+  nodes: Category[],
+  parentId: number | null,
+  orderedIds: number[],
+): Category[] {
+  if (parentId === null) return reorderList(nodes, orderedIds);
+  let changed = false;
+  const next = nodes.map((node) => {
+    if (node.id === parentId) {
+      changed = true;
+      return { ...node, children: reorderList(node.children, orderedIds) };
+    }
+    if (node.children.length === 0) return node;
+    const children = applySiblingOrder(node.children, parentId, orderedIds);
+    if (children === node.children) return node;
+    changed = true;
+    return { ...node, children };
+  });
+  return changed ? next : nodes;
+}
+
+function reorderList(list: Category[], orderedIds: number[]): Category[] {
+  const rank = new Map(orderedIds.map((id, index) => [id, index]));
+  const picked = list.filter((node) => rank.has(node.id));
+  if (picked.length <= 1) return list;
+  picked.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+  let cursor = 0;
+  return list.map((node) => (rank.has(node.id) ? picked[cursor++] : node));
+}
+
+/**
  * 按一级分类聚合账单（子树递归上卷）。
  * 返回 Map<顶级分类id, 金额（支出为正数绝对值）>
  */
@@ -84,6 +119,99 @@ export function rollupByTopLevel(
 export interface NodeShare {
   cat: Category;
   cents: number;
+}
+
+export interface NodeShareCount extends NodeShare {
+  count: number;
+}
+
+/** 整棵子树 id 集合（含自身），分类明细过滤用 */
+export function collectCategoryIds(node: Category): number[] {
+  const ids = [node.id];
+  for (const child of node.children) {
+    ids.push(...collectCategoryIds(child));
+  }
+  return ids;
+}
+
+/**
+ * 一级分类聚合 + 笔数（包含隐藏分类，口径与 Stats 内联占比一致）。
+ * 返回金额 > 0 的桶，按金额降序；count 为该分类整棵子树的账单笔数。
+ */
+export function rollupByTopLevelWithCounts(
+  bills: BillRow[],
+  roots: Category[],
+  kind: BillKind,
+): NodeShareCount[] {
+  const nodeToTop = new Map<number, number>();
+  const assign = (cat: Category, top: number) => {
+    nodeToTop.set(cat.id, top);
+    for (const child of cat.children) assign(child, top);
+  };
+  for (const root of roots) assign(root, root.id);
+
+  const sums = new Map<number, number>();
+  const counts = new Map<number, number>();
+  for (const bill of bills) {
+    if (bill.kind !== kind) continue;
+    const top = nodeToTop.get(bill.category_id);
+    if (top == null) continue;
+    sums.set(top, (sums.get(top) ?? 0) + bill.amount_cents);
+    counts.set(top, (counts.get(top) ?? 0) + 1);
+  }
+
+  return roots
+    .filter((root) => root.kind === kind)
+    .map((root) => ({
+      cat: root,
+      cents: sums.get(root.id) ?? 0,
+      count: counts.get(root.id) ?? 0,
+    }))
+    .filter((share) => share.cents > 0)
+    .sort((a, b) => b.cents - a.cents);
+}
+
+/**
+ * 当前层级聚合 + 笔数：每个直接子分类按整棵子树求和，
+ * 外加直接记在 node 本身的"本级"桶；包含隐藏分类。
+ */
+export function rollupByNodeWithCounts(
+  bills: BillRow[],
+  node: Category,
+  kind: BillKind,
+): NodeShareCount[] {
+  const owner = new Map<number, number>();
+  const assign = (cat: Category, bucket: number) => {
+    owner.set(cat.id, bucket);
+    for (const child of cat.children) assign(child, bucket);
+  };
+  for (const child of node.children) assign(child, child.id);
+
+  const sums = new Map<number, number>([[node.id, 0]]);
+  const counts = new Map<number, number>([[node.id, 0]]);
+  for (const child of node.children) {
+    sums.set(child.id, 0);
+    counts.set(child.id, 0);
+  }
+  for (const bill of bills) {
+    if (bill.kind !== kind) continue;
+    const bucket =
+      bill.category_id === node.id ? node.id : owner.get(bill.category_id);
+    if (bucket == null) continue;
+    sums.set(bucket, (sums.get(bucket) ?? 0) + bill.amount_cents);
+    counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+  }
+
+  return [
+    ...node.children.map((child) => ({
+      cat: child,
+      cents: sums.get(child.id) ?? 0,
+      count: counts.get(child.id) ?? 0,
+    })),
+    { cat: node, cents: sums.get(node.id) ?? 0, count: counts.get(node.id) ?? 0 },
+  ]
+    .filter((share) => share.cents > 0)
+    .sort((a, b) => b.cents - a.cents);
 }
 
 /**

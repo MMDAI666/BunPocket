@@ -24,21 +24,21 @@ export function Confirm({
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Portal>
         <AlertDialog.Backdrop className="zoom-backdrop fixed inset-0 z-50 bg-overlay" />
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-10">
-          <AlertDialog.Popup className="zoom-popup w-full max-w-72 rounded-2xl bg-card p-5 text-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-8">
+          <AlertDialog.Popup className="zoom-popup w-full max-w-72 rounded-[16px] border border-line bg-card p-5 text-center">
             {title != null && (
-              <AlertDialog.Title className="text-base font-semibold text-ink">
+              <AlertDialog.Title className="text-[15px] font-semibold text-ink">
                 {title}
               </AlertDialog.Title>
             )}
             {content != null && (
-              <AlertDialog.Description className="mt-2 text-sm text-ink-2">
+              <AlertDialog.Description className="mt-2 text-[13px] leading-6 text-ink-2">
                 {content}
               </AlertDialog.Description>
             )}
-            <div className="mt-5 flex gap-3">
+            <div className="mt-5 flex gap-2.5">
               <AlertDialog.Close
-                className="flex-1 rounded-full border border-line py-2 text-sm text-ink-2"
+                className="flex-1 rounded-[10px] border border-line py-2.5 text-[13px] text-ink-2 transition-colors hover:bg-chip"
                 aria-label={t("common.cancel")}
               >
                 {t("common.cancel")}
@@ -47,8 +47,8 @@ export function Confirm({
                 type="button"
                 className={
                   danger
-                    ? "flex-1 rounded-full bg-danger py-2 text-sm font-medium text-white"
-                    : "flex-1 rounded-full bg-gradient-to-r from-brand-1 to-brand-2 py-2 text-sm font-medium text-white"
+                    ? "flex-1 rounded-[10px] bg-danger py-2.5 text-[13px] font-medium text-white"
+                    : "flex-1 rounded-[10px] bg-book py-2.5 text-[13px] font-medium text-cream"
                 }
                 onClick={() => {
                   onConfirm();

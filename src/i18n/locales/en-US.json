@@ -2,6 +2,8 @@
   "common": {
     "ok": "OK",
     "cancel": "Cancel",
+    "close": "Close",
+    "backspace": "Backspace",
     "save": "Save",
     "delete": "Delete",
     "edit": "Edit",
@@ -38,7 +40,9 @@
     "categoryBudget": "Category Budgets",
     "viewAll": "View All",
     "setBudget": "Set now",
-    "dayExpense": "Expense"
+    "dayExpense": "Expense",
+    "emptyTitle": "No entries yet",
+    "emptyHint": "Add your first entry and the ledger starts to turn."
   },
   "add": {
     "expense": "Expense",
@@ -52,7 +56,20 @@
     "another": "Next",
     "saved": "Saved",
     "savedAndNew": "Saved, next one",
-    "selectCategoryFirst": "Pick a category first"
+    "selectCategoryFirst": "Pick a category first",
+    "noteLongPress": "Long-press to shatter this note",
+    "noteRemoved": "Note tag removed"
+  },
+  "billDetail": {
+    "title": "Bill Details",
+    "editTitle": "Edit Bill",
+    "amount": "Amount",
+    "kind": "Type",
+    "time": "Time",
+    "note": "Note",
+    "budget": "Budget",
+    "inBudget": "Included",
+    "noNote": "None"
   },
   "stats": {
     "monthly": "Monthly",
@@ -61,8 +78,15 @@
     "income": "Income",
     "net": "Net",
     "dailyFlow": "Daily Flow",
-    "monthlyTrend": "Monthly Trend",
+    "dailyExpense": "Daily Expense",
+    "monthlyTrend": "Monthly income & expense",
     "categoryShare": "By Category",
+    "categories": "Categories",
+    "selfLevel": "This level",
+    "sortTime": "By time",
+    "sortAmount": "By amount",
+    "billCount_one": "{{count}} bill",
+    "billCount_other": "{{count}} bills",
     "totalExpense": "Total Expense",
     "totalIncome": "Total Income",
     "maxDay": "Max Day",
@@ -89,6 +113,8 @@
     "themeDark": "Dark",
     "language": "Language",
     "languageAuto": "System",
+    "on": "On",
+    "off": "Off",
     "dataBackup": "Data Backup",
     "version": "Version"
   },
@@ -99,6 +125,12 @@
     "countUnit": "backups",
     "now": "Back Up Now",
     "restore": "Restore Latest Backup",
+    "pickRestore": "Restore Another Backup",
+    "pickTitle": "Backup History",
+    "pickHint": "Backups in the retention window are listed. Restore verifies integrity and snapshots current data first; invalid or newer-version backups are rejected (no silent fallback).",
+    "pickedContent": "Replace current data with the backup from {{time}}? A snapshot of current data is saved first.",
+    "restoreThis": "Restore Selected Backup",
+    "latest": "Latest",
     "preRestore": "Pre-restore Snapshot",
     "preRestoreTitle": "Pre-restore Snapshot",
     "preRestoreContent": "Replace current data with the latest automatic pre-restore snapshot (to undo a bad restore)",
@@ -114,6 +146,20 @@
     "restartTitle": "Restart Required",
     "restartContent": "The older backup is staged. Fully quit and reopen the app now to finish restoring. Anything you record before restarting will be replaced by the restore (the current database is snapshotted first and can be recovered from \"Pre-restore Snapshot\")."
   },
+  "logs": {
+    "title": "Runtime Logs",
+    "keepDays": "Keep Days",
+    "daysUnit": "days",
+    "hint": "Logs roll daily in the app data directory. Files older than the keep days are removed on startup. Logs never affect ledger data.",
+    "empty": "No logs yet",
+    "refresh": "Refresh",
+    "clear": "Clear Logs",
+    "clearTitle": "Clear all logs?",
+    "clearContent": "All saved log files will be deleted. Ledger data is not affected.",
+    "cleared": "Logs cleared",
+    "clearFailed": "Failed to clear logs",
+    "loadFailed": "Failed to load logs"
+  },
   "categories": {
     "title": "Categories",
     "addChild": "Add Subcategory",
@@ -128,7 +174,10 @@
     "systemCategory": "Built-in",
     "pickFromGallery": "From Gallery",
     "resetIcon": "Reset to Default Icon",
-    "more": "More"
+    "more": "More",
+    "sort": "Sort",
+    "sortDone": "Done",
+    "sortHint": "Long-press and drag to reorder (mouse: press and drag). A category moves together with its subcategories."
   },
   "budget": {
     "title": "Budget",
@@ -146,7 +195,9 @@
     "amountPlaceholder": "Enter amount"
   },
   "bills": {
+    "title": "Bills",
     "searchPlaceholder": "Search notes or categories",
+    "empty": "No matching entries",
     "deleteBillTitle": "Delete this bill?",
     "deleteBillContent": "This cannot be undone"
   },
@@ -203,6 +254,7 @@
     "foodTakeout": "Takeout",
     "dailyBath": "Bath",
     "dailyPaper": "Paper",
-    "dailyOther": "Other"
+    "dailyOther": "Other",
+    "housingRent": "Rent"
   }
 }

@@ -1,38 +1,49 @@
-import { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAppBack } from "../hooks/useAppBack";
 import { useTranslation } from "react-i18next";
-import { Trash2 } from "lucide-react";
+import { BanknoteX, Check } from "lucide-react";
 import {
   type BillKind,
   type Category,
-  deleteBill,
   getBill,
   insertBill,
   loadCategoryRows,
-  recentNotes,
+  recentNotesByCategory,
   updateBill,
 } from "../db";
+import { getHiddenNotes, hideNote, unhideNote } from "../lib/notes";
+import { errorMessage, logEvent } from "../lib/logger";
 import { buildCategoryTree, categoryPath } from "../lib/category";
-import { nowTimeStr, todayStr } from "../lib/format";
-import { exprToCents } from "../lib/money";
+import {
+  dateStrFromMs,
+  localDateTimeToMs,
+  nowTimeStr,
+  timeStrFromMs,
+  todayStr,
+} from "../lib/format";
+import { exprToCents, pressKey, type PadKey } from "../lib/money";
 import { cn } from "../lib/cn";
 import { Segmented } from "../components/ui/Segmented";
 import { Sheet } from "../components/ui/Sheet";
-import { Confirm } from "../components/ui/Confirm";
 import { MonthCalendar } from "../components/ui/MonthCalendar";
 import { TimePicker } from "../components/ui/TimePicker";
 import { NumberPad } from "../components/ui/NumberPad";
+import { NoteTag } from "../components/ui/NoteTag";
 import { IconBadge } from "../components/ui/IconBadge";
 import { ErrorState } from "../components/ui/ErrorState";
+import { PageHeader } from "../components/ui/PageHeader";
 import { toast } from "../components/ui/Toast";
 import { useLocale } from "../hooks/useLocale";
+
+/** 分 → 键盘表达式数字：最多两位小数、去掉多余的 0（与 exprToCents 同一套金额口径） */
+function centsToExpr(cents: number): string {
+  return String(cents / 100);
+}
 
 export function AddBill() {
   const { t } = useTranslation();
   const { locale } = useLocale();
-  const navigate = useNavigate();
-  const location = useLocation();
   const goBack = useAppBack();
   const [searchParams] = useSearchParams();
   const editId = Number(searchParams.get("id")) || null;
@@ -42,14 +53,19 @@ export function AddBill() {
   const [selectedPath, setSelectedPath] = useState<Category[]>([]);
   const [date, setDate] = useState(todayStr());
   const [time, setTime] = useState(nowTimeStr());
+  /** 编辑时保留的原始毫秒：日期/时间未改时原样写回，避免秒/毫秒被 UI 分钟精度截断 */
+  const [originalOccurredAtMs, setOriginalOccurredAtMs] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [excludeBudget, setExcludeBudget] = useState(false);
   const [expr, setExpr] = useState("");
+  /** 刚按过「＝」：下个数字/小数点重开一笔，下个运算符从结果续算（镜像原型 amountEvaluated） */
+  const afterEquals = useRef(false);
   const [noteSuggestions, setNoteSuggestions] = useState<string[]>([]);
+  /** 保存后刷新备注候选（最近使用排序会变化） */
+  const [notesReloadKey, setNotesReloadKey] = useState(0);
 
   const [dateOpen, setDateOpen] = useState(false);
   const [timeOpen, setTimeOpen] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [failed, setFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -63,13 +79,6 @@ export function AddBill() {
         if (!alive) return;
         const tree = buildCategoryTree(rows);
         setRoots(tree);
-        void recentNotes(8)
-          .then((notes) => {
-            if (alive) setNoteSuggestions(notes);
-          })
-          .catch(() => {
-            /* 备注历史只是增强，失败静默 */
-          });
         if (editId) {
           const bill = await getBill(editId);
           if (!alive) return;
@@ -81,12 +90,17 @@ export function AddBill() {
           setKind(bill.kind);
           setDate(bill.date);
           setTime(bill.time);
+          setOriginalOccurredAtMs(bill.occurred_at_ms);
           setNote(bill.note ?? "");
           setExcludeBudget(Boolean(bill.exclude_budget));
-          setExpr(String(bill.amount_cents / 100));
+          setExpr(centsToExpr(bill.amount_cents));
           setSelectedPath(categoryPath(tree, bill.category_id));
         }
-      } catch {
+      } catch (error) {
+        void logEvent("error", "add.load.failed", {
+          editId,
+          message: errorMessage(error),
+        });
         if (alive) setFailed(true);
       }
     })();
@@ -103,19 +117,65 @@ export function AddBill() {
   const current = selectedPath[selectedPath.length - 1] ?? null;
   const children = current?.children.filter((c) => !c.hidden) ?? [];
   const cents = exprToCents(expr);
+  /** 算式含运算符且不是尾随运算符时，主键先当「＝」：算出结果后才恢复「确定」 */
+  const pendingEquals = /[+-]/.test(expr) && !/[+-]$/.test(expr);
+
+  // 备注候选跟随当前选中的分类本身（不混入父/子分类）；未选分类时不展示候选
+  const noteCategoryId = current?.id ?? null;
+  useEffect(() => {
+    let alive = true;
+    if (noteCategoryId == null) {
+      setNoteSuggestions([]);
+      return;
+    }
+    void (async () => {
+      try {
+        const hidden = await getHiddenNotes();
+        const notes = await recentNotesByCategory(
+          noteCategoryId,
+          8,
+          hidden,
+        );
+        if (alive) setNoteSuggestions(notes);
+      } catch {
+        if (alive) setNoteSuggestions([]);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [noteCategoryId, notesReloadKey]);
+
+  /** 长按粉碎：只把标签移出候选（历史账单的备注文字保持原样） */
+  const shatterNote = async (suggestion: string) => {
+    if (noteCategoryId == null) return;
+    try {
+      await hideNote(suggestion);
+      setNoteSuggestions((prev) =>
+        prev.filter((item) => item !== suggestion),
+      );
+      await logEvent("info", "note.hide", {
+        note: suggestion,
+        category_id: noteCategoryId,
+      });
+      toast.show(t("add.noteRemoved"));
+    } catch (error) {
+      void logEvent("error", "note.hide.failed", {
+        note: suggestion,
+        message: errorMessage(error),
+      });
+      toast.show(t("common.saveFailed"), "error");
+    }
+  };
 
   const changeKind = (next: BillKind) => {
     setKind(next);
     setSelectedPath([]);
   };
 
-  /** 保存/删除后返回上一页；没有应用内历史时才 replace 回首页（避免历史栈出现两个 Home） */
+  /** 保存后返回上一页；没有应用内历史时才 replace 回首页（避免历史栈出现两个 Home） */
   const finish = () => {
-    if (location.key !== "default") {
-      navigate(-1);
-    } else {
-      navigate("/", { replace: true });
-    }
+    goBack();
   };
 
   const save = async (thenNew: boolean) => {
@@ -129,6 +189,15 @@ export function AddBill() {
       if (expr.trim() !== "") toast.show(t("common.invalidAmount"), "error");
       return;
     }
+    const keepOriginal =
+      editId != null &&
+      originalOccurredAtMs != null &&
+      dateStrFromMs(originalOccurredAtMs) === date &&
+      timeStrFromMs(originalOccurredAtMs) === time;
+    const occurred_at_ms =
+      keepOriginal && originalOccurredAtMs != null
+        ? originalOccurredAtMs
+        : localDateTimeToMs(date, time);
     const payload = {
       amount_cents: cents,
       kind,
@@ -136,49 +205,93 @@ export function AddBill() {
       note: note.trim() || null,
       // 收入账单没有"不计入预算"语义，统一存 false
       exclude_budget: kind === "expense" ? excludeBudget : false,
-      date,
-      time,
+      occurred_at_ms,
     };
+    const savedNote = note.trim();
     setSaving(true);
     try {
+      const logDetail = {
+        amount_cents: payload.amount_cents,
+        kind: payload.kind,
+        category_id: payload.category_id,
+        note: payload.note,
+        exclude_budget: payload.exclude_budget,
+        date,
+        time,
+        occurred_at_ms,
+      };
       if (editId) {
         await updateBill(editId, payload);
+        await logEvent("info", "bill.update", { id: editId, ...logDetail });
       } else {
-        await insertBill(payload);
+        const id = await insertBill(payload);
+        await logEvent("info", "bill.add", { id, ...logDetail });
       }
+      // 重新主动使用这条备注后，让它回到候选里
+      if (savedNote) {
+        await unhideNote(savedNote).catch(() => {
+          /* 候选状态失败不影响保存 */
+        });
+      }
+      setNotesReloadKey((key) => key + 1);
       if (thenNew && !editId) {
         setExpr("");
         setNote("");
+        afterEquals.current = false;
         toast.show(t("add.savedAndNew"));
       } else {
         toast.show(t("add.saved"));
         finish();
       }
-    } catch {
+    } catch (error) {
+      void logEvent("error", "bill.save.failed", {
+        id: editId ?? null,
+        message: errorMessage(error),
+      });
       toast.show(t("common.saveFailed"), "error");
     } finally {
       setSaving(false);
     }
   };
 
+  /**
+   * 键盘「＝」两段行为：算式可求值时先算出结果并把主键恢复为「确定」，
+   * 再点一次才保存（金额口径与 exprToCents 一致）。
+   */
+  const submit = () => {
+    if (saving) return;
+    if (!pendingEquals) {
+      void save(false);
+      return;
+    }
+    if (cents == null) return;
+    setExpr(centsToExpr(cents));
+    afterEquals.current = true;
+  };
+
+  /** 「＝」之后：数字/小数点重开一笔，运算符从结果续算，退格照常编辑 */
+  const changeExpr = (next: string, key: PadKey) => {
+    if (!afterEquals.current) {
+      setExpr(next);
+      return;
+    }
+    afterEquals.current = false;
+    if (key === "+" || key === "-" || key === "back") {
+      setExpr(next);
+      return;
+    }
+    // 数字/小数点：忽略结果已占满小数位/位数时的键盘限制，等价于从空算式重新输入
+    setExpr(pressKey("", key));
+  };
+
   if (roots === null || failed) {
     return (
-      <div className="flex h-full flex-col bg-card">
-        <div className="flex items-center px-2 pt-[max(env(safe-area-inset-top),0.5rem)] pb-1">
-          <button
-            type="button"
-            className="flex h-10 w-10 items-center justify-center rounded-full text-xl text-ink active:bg-chip"
-            onClick={goBack}
-            aria-label={t("common.back")}
-          >
-            ‹
-          </button>
-          <div className="flex-1 text-center text-base font-semibold text-ink">
-            {t("nav.add")}
-          </div>
-          <div className="w-10" />
-        </div>
-        <div className="px-4 pt-8">
+      <div className="flex h-full flex-col bg-page">
+        <PageHeader
+          title={editId ? t("billDetail.editTitle") : t("nav.add")}
+          onBack={goBack}
+        />
+        <div className="px-4 pt-4">
           {failed ? (
             <ErrorState
               onRetry={() => {
@@ -188,7 +301,9 @@ export function AddBill() {
               }}
             />
           ) : (
-            <div className="py-10 text-center text-sm text-ink-3">…</div>
+            <div className="paper py-12 text-center text-[13px] text-ink-3">
+              …
+            </div>
           )}
         </div>
       </div>
@@ -197,34 +312,12 @@ export function AddBill() {
 
   return (
     <div className="flex h-full flex-col bg-card">
-      {/* 顶栏 */}
-      <div className="flex items-center px-2 pt-[max(env(safe-area-inset-top),0.5rem)] pb-1">
-        <button
-          type="button"
-          className="flex h-10 w-10 items-center justify-center rounded-full text-xl text-ink active:bg-chip"
-          onClick={goBack}
-          aria-label={t("common.back")}
-        >
-          ‹
-        </button>
-        <div className="flex-1 text-center text-base font-semibold text-ink">
-          {t("nav.add")}
-        </div>
-        {editId ? (
-          <button
-            type="button"
-            className="flex h-10 w-10 items-center justify-center rounded-full text-ink active:bg-chip"
-            onClick={() => setConfirmDelete(true)}
-            aria-label={t("common.delete")}
-          >
-            <Trash2 size={20} />
-          </button>
-        ) : (
-          <div className="w-10" />
-        )}
-      </div>
+      <PageHeader
+        title={editId ? t("billDetail.editTitle") : t("nav.add")}
+        onBack={goBack}
+      />
 
-      <div className="px-4 pb-2">
+      <div className="px-4 pb-2 pt-1">
         <Segmented
           options={[
             { value: "expense", label: t("add.expense") },
@@ -235,16 +328,16 @@ export function AddBill() {
         />
       </div>
 
-      {/* 中部可滚动：分类宫格（面包屑与子分类 chips 在滚动区外的固定条，避免被宫格挤到折叠线以下） */}
+      {/* 中部可滚动：分类宫格（面包屑与子分类 chips 在滚动区外的固定条） */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4">
-        <div className="grid grid-cols-4 py-2">
+        <div className="grid grid-cols-4 gap-y-1 py-2">
           {visibleRoots.map((cat) => {
             const selected = selectedPath[0]?.id === cat.id;
             return (
               <button
                 key={cat.id}
                 type="button"
-                className="flex flex-col items-center gap-1 py-2"
+                className="flex flex-col items-center gap-1.5 py-2"
                 onClick={() => setSelectedPath([cat])}
               >
                 <div className="relative">
@@ -254,17 +347,21 @@ export function AddBill() {
                     nameKey={cat.name_key}
                     iconType={cat.icon_type}
                     size="lg"
-                    className={cn(selected && "ring-2 ring-brand ring-offset-2 ring-offset-card")}
+                    className={cn(
+                      "transition-shadow",
+                      selected &&
+                        "ring-2 ring-book ring-offset-2 ring-offset-card",
+                    )}
                   />
                   {selected && (
-                    <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-brand text-[10px] text-white">
-                      ✓
+                    <span className="absolute -top-1 -right-1 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-book text-cream ring-2 ring-card">
+                      <Check size={11} strokeWidth={3} />
                     </span>
                   )}
                 </div>
                 <span
                   className={cn(
-                    "max-w-full truncate text-xs",
+                    "max-w-full truncate text-[11px]",
                     selected ? "font-medium text-ink" : "text-ink-2",
                   )}
                 >
@@ -276,17 +373,17 @@ export function AddBill() {
         </div>
       </div>
 
-      {/* 固定子分类条：面包屑 + 子分类 chips，位于宫格与元信息行之间，恒定可见 */}
+      {/* 固定子分类条：面包屑 + 子分类 chips */}
       {(selectedPath.length > 1 || children.length > 0) && (
-        <div className="flex flex-col gap-1 border-t border-line px-4 py-2">
+        <div className="flex flex-col gap-1.5 border-t border-line px-4 py-2">
           {selectedPath.length > 1 && (
-            <div className="flex flex-wrap items-center gap-1 text-xs text-ink-3">
+            <div className="flex flex-wrap items-center gap-1 text-[11px] text-ink-3">
               {selectedPath.map((node, i) => (
                 <span key={node.id} className="flex items-center gap-1">
-                  {i > 0 && <span>›</span>}
+                  {i > 0 && <span className="text-ink-3">›</span>}
                   <button
                     type="button"
-                    className="rounded px-1 py-0.5 text-ink-2 active:bg-chip"
+                    className="rounded-[6px] px-1 py-0.5 text-ink-2 transition-colors hover:bg-chip"
                     onClick={() => setSelectedPath(selectedPath.slice(0, i + 1))}
                   >
                     {node.name_key ? t(node.name_key) : node.name}
@@ -304,14 +401,25 @@ export function AddBill() {
                     key={child.id}
                     type="button"
                     className={cn(
-                      "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs",
+                      "flex items-center gap-1.5 rounded-[9px] border px-2.5 py-1.5 text-[11px] transition-colors",
                       active
-                        ? "bg-gradient-to-r from-brand-1 to-brand-2 text-white"
-                        : "bg-chip text-ink-2",
+                        ? "border-brand-soft bg-brand-soft text-brand"
+                        : "border-line bg-card text-ink-2 hover:bg-chip",
                     )}
                     onClick={() => setSelectedPath([...selectedPath, child])}
                   >
-                    <IconBadge icon={child.icon} iconImage={child.icon_image} nameKey={child.name_key} iconType={child.icon_type} size="sm" iconSize={14} className="h-5 w-5 text-sm" />
+                    <IconBadge
+                      icon={child.icon}
+                      iconImage={child.icon_image}
+                      nameKey={child.name_key}
+                      iconType={child.icon_type}
+                      size="sm"
+                      iconSize={13}
+                      className={cn(
+                        "h-5 w-5 border-0 text-[13px]",
+                        active ? "bg-cream/15" : "bg-chip",
+                      )}
+                    />
                     {child.name_key ? t(child.name_key) : child.name}
                   </button>
                 );
@@ -321,86 +429,92 @@ export function AddBill() {
         </div>
       )}
 
-      {/* 固定底部区：元信息行 + 金额显示 + 数字键盘 */}
-      <div className="flex items-center gap-2 px-4 py-2">
-        <button
-          type="button"
-          className="shrink-0 rounded-full border border-line px-3 py-1.5 text-xs text-ink-2"
-          onClick={() => setDateOpen(true)}
-        >
-          {date === todayStr() ? t("add.dateToday") : date}
-        </button>
-        <button
-          type="button"
-          className="shrink-0 rounded-full border border-line px-3 py-1.5 text-xs text-ink-2"
-          onClick={() => setTimeOpen(true)}
-        >
-          {time}
-        </button>
-        <input
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder={t("add.notePlaceholder")}
-          aria-label={t("add.notePlaceholder")}
-          className="min-w-0 flex-1 rounded-full border border-line px-3 py-1.5 text-xs text-ink outline-none placeholder:text-ink-3 focus:border-brand"
-        />
-        {kind === "expense" && (
+      {/* 固定底部区：日期 / 时间 / 不计预算 + 备注 + 金额 + 键盘 */}
+      <div className="border-t border-line">
+        <div className="flex items-center gap-2 px-4 pt-2.5">
           <button
             type="button"
-            className={cn(
-              "shrink-0 rounded-full border px-3 py-1.5 text-xs",
-              excludeBudget
-                ? "border-brand bg-brand/10 font-medium text-brand"
-                : "border-line text-ink-3",
-            )}
-            aria-pressed={excludeBudget}
-            onClick={() => setExcludeBudget((v) => !v)}
+            className="shrink-0 rounded-[9px] border border-line px-2.5 py-1.5 text-[11px] text-ink-2 transition-colors hover:bg-chip"
+            onClick={() => setDateOpen(true)}
           >
-            {t("add.excludeBudget")}
+            {date === todayStr() ? t("add.dateToday") : date}
           </button>
-        )}
-      </div>
-
-      {/* 备注历史（备注为空时给出最近用过的备注；onMouseDown 阻止点击瞬间失焦带来的移动端/桌面端行为差异） */}
-      {note === "" && noteSuggestions.length > 0 && (
-        <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto px-4 pb-1">
-          {noteSuggestions.map((suggestion) => (
+          <button
+            type="button"
+            className="shrink-0 rounded-[9px] border border-line px-2.5 py-1.5 text-[11px] text-ink-2 transition-colors hover:bg-chip"
+            onClick={() => setTimeOpen(true)}
+          >
+            {time}
+          </button>
+          {kind === "expense" && (
             <button
-              key={suggestion}
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              className="max-w-full truncate rounded-full bg-chip px-2.5 py-1 text-xs text-ink-2 active:bg-line"
-              onClick={() => setNote(suggestion)}
+              className={cn(
+                "ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] border transition-colors",
+                excludeBudget
+                  ? "border-book bg-brand-soft text-brand"
+                  : "border-line text-ink-3 hover:bg-chip",
+              )}
+              aria-label={t("add.excludeBudget")}
+              aria-pressed={excludeBudget}
+              title={t("add.excludeBudget")}
+              onClick={() => setExcludeBudget((v) => !v)}
             >
-              {suggestion}
+              <BanknoteX size={15} strokeWidth={1.9} />
             </button>
-          ))}
+          )}
         </div>
-      )}
 
-      {/* 金额显示区 */}
-      <div className="flex min-h-14 flex-col items-end justify-center px-4 pb-1">
-        {expr === "" ? (
-          <span className="text-2xl font-light text-ink-3">
-            {t("add.amountPlaceholder")}
-          </span>
-        ) : (
-          <span className="max-w-full truncate text-3xl font-light text-ink">
-            <span className="mr-1 text-lg align-top">¥</span>
-            {expr}
-          </span>
+        <div className="px-4 pt-2">
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder={t("add.notePlaceholder")}
+            aria-label={t("add.notePlaceholder")}
+            className="w-full rounded-[9px] border border-line bg-card px-3 py-1.5 text-[12px] text-ink outline-none placeholder:text-ink-3 focus:border-brand"
+          />
+        </div>
+
+        {/* 备注候选：跟随当前选中的分类本身；长按粉碎只把标签移出候选 */}
+        {note === "" && noteSuggestions.length > 0 && (
+          <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto px-4 pt-1.5">
+            {noteSuggestions.map((suggestion) => (
+              <NoteTag
+                key={suggestion}
+                note={suggestion}
+                onPick={setNote}
+                onShatter={(target) => void shatterNote(target)}
+              />
+            ))}
+          </div>
         )}
+
+        <div className="flex min-h-[64px] items-end justify-end px-5 pb-2 pt-1">
+          {expr === "" ? (
+            <span className="text-[22px] font-light text-ink-3">
+              {t("add.amountPlaceholder")}
+            </span>
+          ) : (
+            <span className="num max-w-full truncate text-[38px] leading-none font-semibold tracking-[-0.04em] text-ink">
+              <span className="mr-1 align-top text-[18px] font-medium text-ink-2">
+                ¥
+              </span>
+              {expr}
+            </span>
+          )}
+        </div>
       </div>
 
       <NumberPad
         value={expr}
-        onChange={setExpr}
-        onSubmit={() => void save(false)}
+        onChange={changeExpr}
+        submitLabel={pendingEquals ? "＝" : undefined}
+        onSubmit={submit}
         submitDisabled={saving || cents == null || !current}
         onAnother={() => void save(true)}
       />
 
-      {/* 日期 / 时间 / 备注历史 弹层 */}
+      {/* 日期 / 时间 弹层 */}
       <Sheet open={dateOpen} onOpenChange={setDateOpen} title={t("add.pickDate")}>
         <MonthCalendar
           value={date}
@@ -414,25 +528,6 @@ export function AddBill() {
       <Sheet open={timeOpen} onOpenChange={setTimeOpen} title={t("add.pickTime")}>
         <TimePicker value={time} onChange={setTime} />
       </Sheet>
-
-      <Confirm
-        open={confirmDelete}
-        onOpenChange={setConfirmDelete}
-        title={t("bills.deleteBillTitle")}
-        content={t("bills.deleteBillContent")}
-        danger
-        onConfirm={() => {
-          if (editId) {
-            setSaving(true);
-            void deleteBill(editId)
-              .then(() => finish())
-              .catch(() => {
-                setSaving(false);
-                toast.show(t("common.deleteFailed"), "error");
-              });
-          }
-        }}
-      />
     </div>
   );
 }

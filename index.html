@@ -6,7 +6,18 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#e4f1ea" />
     <title>BunPocket</title>
+    <style>
+      /* 冷启动底色：避免 React/CSS 就绪前白屏 */
+      html {
+        background: #f6faf7;
+      }
+      html.dark {
+        background: #101713;
+      }
+    </style>
     <script>
       // 深色模式冷启动预上色：读 localStorage 镜像，避免 React/DB 就绪前白屏闪烁。
       // 镜像由 src/lib/theme.ts 维护；缺失时按系统主题（应用默认设置为 auto）。

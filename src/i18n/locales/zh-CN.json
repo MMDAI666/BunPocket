@@ -2,6 +2,8 @@
   "common": {
     "ok": "确定",
     "cancel": "取消",
+    "close": "关闭",
+    "backspace": "退格",
     "save": "保存",
     "delete": "删除",
     "edit": "编辑",
@@ -38,7 +40,9 @@
     "categoryBudget": "分类预算",
     "viewAll": "查看全部",
     "setBudget": "去设置",
-    "dayExpense": "支出"
+    "dayExpense": "支出",
+    "emptyTitle": "还没有账目",
+    "emptyHint": "记下第一笔，账本就开始运转了"
   },
   "add": {
     "expense": "支出",
@@ -52,7 +56,20 @@
     "another": "再记",
     "saved": "已保存",
     "savedAndNew": "已保存，继续记",
-    "selectCategoryFirst": "请选择分类"
+    "selectCategoryFirst": "请选择分类",
+    "noteLongPress": "长按粉碎该备注",
+    "noteRemoved": "备注标签已删除"
+  },
+  "billDetail": {
+    "title": "账单详情",
+    "editTitle": "编辑账单",
+    "amount": "记账金额",
+    "kind": "类型",
+    "time": "时间",
+    "note": "备注",
+    "budget": "预算",
+    "inBudget": "计入预算",
+    "noNote": "无"
   },
   "stats": {
     "monthly": "月度",
@@ -61,13 +78,19 @@
     "income": "收入",
     "net": "净收入",
     "dailyFlow": "每日收支",
-    "monthlyTrend": "月趋势",
+    "dailyExpense": "每日支出",
+    "monthlyTrend": "月度收入与支出",
     "categoryShare": "收支占比",
+    "categories": "类别",
+    "selfLevel": "本级",
+    "sortTime": "按时间",
+    "sortAmount": "按金额",
+    "billCount": "{{count}}笔",
     "totalExpense": "总支出",
     "totalIncome": "总收入",
-    "maxDay": "最高日",
-    "minDay": "最低日",
-    "dailyAvg": "日均",
+    "maxDay": "最高日支出",
+    "minDay": "最低日支出",
+    "dailyAvg": "日均支出",
     "maxMonth": "最高月",
     "minMonth": "最低月",
     "monthlyAvg": "月均",
@@ -89,6 +112,8 @@
     "themeDark": "深色",
     "language": "语言",
     "languageAuto": "跟随系统",
+    "on": "开启",
+    "off": "关闭",
     "dataBackup": "数据备份",
     "version": "版本"
   },
@@ -99,6 +124,12 @@
     "countUnit": "份",
     "now": "立即备份",
     "restore": "恢复最近备份",
+    "pickRestore": "选择备份恢复",
+    "pickTitle": "历史备份",
+    "pickHint": "已列出保留期内的备份；恢复前会校验完整性并自动快照当前数据。校验失败或来自更新版本的备份会被拒绝，不会静默换用其他备份。",
+    "pickedContent": "将用 {{time}} 的备份覆盖当前数据；恢复前会自动保存一份当前数据快照。",
+    "restoreThis": "恢复选中备份",
+    "latest": "最新",
     "preRestore": "恢复前快照",
     "preRestoreTitle": "恢复前快照",
     "preRestoreContent": "将用最近一次恢复前自动保存的快照覆盖当前数据（用于撤销误恢复）",
@@ -114,6 +145,20 @@
     "restartTitle": "需要重启应用",
     "restartContent": "旧版本备份已准备就绪。请现在完全退出并重新打开应用完成恢复；在重启前继续记账，这些新记录会被恢复流程覆盖（当前主库会先自动快照，可在“恢复前快照”中找回）。"
   },
+  "logs": {
+    "title": "运行日志",
+    "keepDays": "保留天数",
+    "daysUnit": "天",
+    "hint": "日志按天滚动保存在应用数据目录，超过保留天数的文件会自动删除；只记录事件，不影响账目数据。",
+    "empty": "暂无日志",
+    "refresh": "刷新",
+    "clear": "清空日志",
+    "clearTitle": "清空全部日志？",
+    "clearContent": "将删除所有已保存的日志文件，不影响账目数据。",
+    "cleared": "日志已清空",
+    "clearFailed": "清空日志失败",
+    "loadFailed": "日志读取失败"
+  },
   "categories": {
     "title": "分类管理",
     "addChild": "新增子分类",
@@ -128,7 +173,10 @@
     "systemCategory": "预置",
     "pickFromGallery": "从相册选择",
     "resetIcon": "恢复默认图标",
-    "more": "更多操作"
+    "more": "更多操作",
+    "sort": "排序",
+    "sortDone": "完成",
+    "sortHint": "长按拖动排序（鼠标按住即拖）；一级分类连同子分类一起移动"
   },
   "budget": {
     "title": "预算设置",
@@ -146,7 +194,9 @@
     "amountPlaceholder": "输入金额"
   },
   "bills": {
+    "title": "账单",
     "searchPlaceholder": "搜索备注或分类",
+    "empty": "没有找到匹配的账目",
     "deleteBillTitle": "删除这笔账单？",
     "deleteBillContent": "删除后不可恢复"
   },
@@ -172,7 +222,7 @@
     "medical": "医疗",
     "housing": "住房",
     "telecom": "通讯",
-    "utilities": "水电燃气",
+    "utilities": "生活缴费",
     "education": "学习",
     "digital": "数码",
     "clothing": "服饰",
@@ -203,6 +253,7 @@
     "foodTakeout": "外卖",
     "dailyBath": "洗浴",
     "dailyPaper": "纸",
-    "dailyOther": "其他"
+    "dailyOther": "其他",
+    "housingRent": "房租"
   }
 }

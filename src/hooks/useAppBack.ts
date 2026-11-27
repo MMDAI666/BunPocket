@@ -1,19 +1,24 @@
 import { useCallback } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useAppNavigate } from "./useAppNavigate";
 
 /**
- * 二级页返回：有应用内历史则回退（location.key 非 "default" 说明经历过
- * 应用内跳转）；当前页是初始落地页（如深链/状态恢复直接打开）时没有
- * 可回退的历史，兜底替换到首页。
+ * 二级页返回：应用内历史存在（history.state.idx > 0）就回退，
+ * 否则 replace 到 fallback（默认首页）。
+ *
+ * 用 history.state.idx 而不是 location.key：data router 下 replace 也会换 key，
+ * 但不会新增历史；idx 才代表真实可回退层级。
  */
-export function useAppBack() {
-  const navigate = useNavigate();
-  const location = useLocation();
+export function useAppBack(fallback = "/") {
+  const navigate = useAppNavigate();
   return useCallback(() => {
-    if (location.key !== "default") {
+    const idx =
+      typeof window !== "undefined"
+        ? (window.history.state as { idx?: number } | null)?.idx
+        : undefined;
+    if (typeof idx === "number" && idx > 0) {
       navigate(-1);
     } else {
-      navigate("/", { replace: true });
+      navigate(fallback, { replace: true });
     }
-  }, [navigate, location.key]);
+  }, [navigate, fallback]);
 }

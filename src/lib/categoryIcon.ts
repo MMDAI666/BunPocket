@@ -14,6 +14,7 @@ import {
   Gift,
   HandCoins,
   House,
+  KeyRound,
   Package,
   PartyPopper,
   Phone,
@@ -37,7 +38,7 @@ import {
 
 /**
  * 系统分类（name_key）→ 图标库映射。
- * `icon_type=auto` 时系统分类优先使用这里的 SVG；自定义分类/未映射 key 仍回退 emoji。
+ * `icon_type=auto` 现在默认显示存储的 emoji；只有 icon 为空时才用这里的 SVG 兜底。
  */
 const CATEGORY_ICONS: Record<string, LucideIcon> = {
   "category.food": Utensils,
@@ -81,6 +82,8 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
   "category.dailyBath": ShowerHead,
   "category.dailyPaper": ScrollText,
   "category.dailyOther": Package,
+  // 006 默认分类 v3 新增
+  "category.housingRent": KeyRound,
 };
 
 /** 按系统分类 name_key 查图标库图标，查不到返回 null */

@@ -38,6 +38,18 @@ pub fn run() {
             sql: migration_sql(include_str!("../migrations/004_business_constraints.sql")),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 5,
+            description: "bill time as UTC epoch ms",
+            sql: migration_sql(include_str!("../migrations/005_bill_time_ms.sql")),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 6,
+            description: "default categories v3: housing rent subcategory",
+            sql: migration_sql(include_str!("../migrations/006_housing_rent.sql")),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

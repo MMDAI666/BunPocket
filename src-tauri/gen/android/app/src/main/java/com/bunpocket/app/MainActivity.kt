@@ -9,6 +9,9 @@ class MainActivity : TauriActivity() {
   private var appWebView: WebView? = null
 
   override fun onCreate(savedInstanceState: Bundle?) {
+    // 个人自用：release 包也默认开启 WebView 远程调试（chrome://inspect）。
+    // 注意：任何已授权 USB 调试的电脑都能通过 CDP 检查页面、执行 JS；换机/发布前应移除。
+    WebView.setWebContentsDebuggingEnabled(true)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     // 注册晚于各插件（LIFO 优先级最高），接管 tauri AppPlugin 的返回回调：

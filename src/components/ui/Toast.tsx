@@ -19,10 +19,10 @@ function ToastViewport() {
             key={item.id}
             toast={item}
             className={cn(
-              "toast-item pointer-events-auto max-w-full truncate rounded-full px-4 py-2 text-sm shadow-lg",
+              "toast-item pointer-events-auto max-w-full truncate rounded-[10px] border px-4 py-2 text-[13px] shadow-lg",
               item.type === "error"
-                ? "bg-danger text-white"
-                : "bg-ink text-card",
+                ? "border-danger/20 bg-danger text-white"
+                : "border-ink/10 bg-ink text-card",
             )}
           >
             <Toast.Title>{item.title}</Toast.Title>

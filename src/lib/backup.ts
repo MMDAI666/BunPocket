@@ -11,6 +11,7 @@ import Database from "@tauri-apps/plugin-sql";
 import { closeDb, getDb } from "../db";
 import { getSetting, setSetting } from "../settings";
 import { todayStr } from "./format";
+import { errorMessage, logEvent } from "./logger";
 
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -31,6 +32,9 @@ export interface BackupInfo {
 
 /** 恢复结果：reloaded = 本次已换库并刷新页面；restart-required = 已准备换库，需完全重启应用 */
 export type RestoreResult = "reloaded" | "restart-required";
+
+/** 恢复入口，写日志时区分"最新备份 / 恢复前快照 / 历史备份列表指定" */
+export type RestoreSource = "latest" | "prerestore" | "picked";
 
 /**
  * 备份/恢复串行锁：VACUUM/校验/换库都会操作同一个数据库与目录，
@@ -107,6 +111,7 @@ export async function getKeepCount(): Promise<number> {
 export async function setKeepCount(count: number): Promise<void> {
   const clamped = Math.min(Math.max(Math.round(count), 1), MAX_KEEP);
   await setSetting("backup_keep", String(clamped));
+  await logEvent("info", "backup.keep", { count: clamped });
 }
 
 /**
@@ -252,19 +257,28 @@ async function createBackup(prefix = BACKUP_PREFIX): Promise<BackupInfo> {
     throw e;
   }
   await rename(partialPath, finalPath);
+  await logEvent("info", "backup.create", {
+    name,
+    kind: prefix === PRERESTORE_PREFIX ? "prerestore" : "regular",
+  });
   return { name, date };
 }
 
 async function rotateBackups(keep: number): Promise<void> {
   const backups = await listBackups();
   const dir = await backupDirPath();
+  const removed: string[] = [];
   for (const old of backups.slice(keep)) {
     try {
       await remove(await join(dir, old.name));
+      removed.push(old.name);
     } catch (e) {
       // 轮转失败不应让"备份已成功"整体失败
       console.warn("remove old backup failed:", old.name, e);
     }
+  }
+  if (removed.length > 0) {
+    await logEvent("info", "backup.rotate", { keep, removed });
   }
 }
 
@@ -318,10 +332,17 @@ async function cleanupPreRestoreBackups(keep = 1): Promise<void> {
 /** 手动立即备份（设置页按钮）：备份 + 轮转 */
 export async function backupNow(): Promise<BackupInfo> {
   return withBackupLock(async () => {
-    const info = await createBackup();
-    await setSetting("last_backup_at", info.date.toISOString());
-    await rotateBackups(await getKeepCount());
-    return info;
+    try {
+      const info = await createBackup();
+      await setSetting("last_backup_at", info.date.toISOString());
+      await rotateBackups(await getKeepCount());
+      return info;
+    } catch (error) {
+      await logEvent("error", "backup.failed", {
+        message: errorMessage(error),
+      });
+      throw error;
+    }
   });
 }
 
@@ -347,6 +368,9 @@ export async function ensureDailyBackup(): Promise<void> {
       await cleanupPreRestoreBackups(1);
     } catch (e) {
       console.warn("daily backup failed:", e);
+      void logEvent("warn", "backup.daily.failed", {
+        message: errorMessage(e),
+      });
     }
   });
 }
@@ -487,6 +511,9 @@ export async function applyPendingRestore(): Promise<boolean> {
     await verifyBackupAt(`bunpocket.db${PENDING_RESTORE_SUFFIX}`);
   } catch (e) {
     console.warn("pending restore file invalid, skipped:", e);
+    void logEvent("warn", "restore.pending.invalid", {
+      message: errorMessage(e),
+    });
     // 无效 pending 必须清掉，否则每次启动都重复校验；同时留标记让 UI 提示用户
     try {
       await remove(pendingPath);
@@ -506,9 +533,15 @@ export async function applyPendingRestore(): Promise<boolean> {
     await snapshotCurrentDbBeforeApply();
   } catch (e) {
     console.warn("snapshot current db before pending restore failed:", e);
+    void logEvent("warn", "restore.snapshot.failed", {
+      message: errorMessage(e),
+    });
   }
 
   await replaceMainDbFile(pendingPath);
+  await logEvent("info", "restore.pending.applied", {
+    pending: "bunpocket.db.pending-restore",
+  });
   return true;
 }
 
@@ -520,10 +553,13 @@ export async function applyPendingRestore(): Promise<boolean> {
  * @param backupBeforeRestore 是否在恢复前生成"当前库快照"。从常规备份恢复时为 true；
  *        从 prerestore 快照恢复时必须为 false——否则新快照 + 只保留一份的清理会删掉
  *        正在恢复的那份快照。
+ * @param source 恢复入口：latest=最新备份快捷入口；prerestore=恢复前快照；
+ *        picked=用户在历史备份列表里指定的一份。
  */
 async function restoreCandidates(
   names: string[],
   backupBeforeRestore = true,
+  source: RestoreSource = "latest",
 ): Promise<RestoreResult> {
   if (!isTauri) throw new Error("fs unavailable");
   if (names.length === 0) throw new Error("no-backup");
@@ -554,6 +590,12 @@ async function restoreCandidates(
     }
   }
   if (!chosen) throw new Error(lastError || "backup-invalid");
+  await logEvent("info", "restore.start", {
+    backup: chosen.name,
+    version: chosen.version,
+    backupBeforeRestore,
+    source,
+  });
 
   if (backupBeforeRestore) {
     // 恢复前快照（当前数据），误恢复时可从备份目录的 prerestore-* 手动找回
@@ -564,6 +606,11 @@ async function restoreCandidates(
   const dbPath = await dbFilePath();
   if (chosen.version === currentVersion) {
     await swapMainDbWithBackup(chosen.name);
+    await logEvent("info", "restore.done", {
+      backup: chosen.name,
+      mode: "reload",
+      source,
+    });
     location.reload();
     return "reloaded";
   }
@@ -578,22 +625,69 @@ async function restoreCandidates(
     /* 覆盖旧 pending */
   }
   await copyFile(src, pendingPath);
+  await logEvent("info", "restore.pending.staged", {
+    backup: chosen.name,
+    version: chosen.version,
+    source,
+  });
   return "restart-required";
 }
 
 /** 用最新一份可用备份覆盖当前库（见 restoreCandidates 的版本语义） */
 export async function restoreLatestBackup(): Promise<RestoreResult> {
-  return withBackupLock(async () =>
-    restoreCandidates((await listBackups()).map((b) => b.name)),
-  );
+  return withBackupLock(async () => {
+    try {
+      return await restoreCandidates(
+        (await listBackups()).map((b) => b.name),
+        true,
+        "latest",
+      );
+    } catch (error) {
+      await logEvent("error", "restore.failed", {
+        source: "latest",
+        message: errorMessage(error),
+      });
+      throw error;
+    }
+  });
+}
+
+/**
+ * 用用户指定的历史备份覆盖当前库。
+ * 只尝试这一份：不兼容/来自更新版本时直接报错，不会静默换另一份。
+ */
+export async function restoreBackupByName(name: string): Promise<RestoreResult> {
+  if (!name) throw new Error("no-backup");
+  return withBackupLock(async () => {
+    await logEvent("info", "restore.pick", { backup: name });
+    try {
+      return await restoreCandidates([name], true, "picked");
+    } catch (error) {
+      await logEvent("error", "restore.failed", {
+        source: "picked",
+        backup: name,
+        message: errorMessage(error),
+      });
+      throw error;
+    }
+  });
 }
 
 /** 回退到最近一次"恢复前快照"（误恢复时的兜底入口） */
 export async function restorePreRestoreSnapshot(): Promise<RestoreResult> {
-  return withBackupLock(async () =>
-    restoreCandidates(
-      (await listPreRestoreSnapshots()).map((s) => s.name),
-      false,
-    ),
-  );
+  return withBackupLock(async () => {
+    try {
+      return await restoreCandidates(
+        (await listPreRestoreSnapshots()).map((s) => s.name),
+        false,
+        "prerestore",
+      );
+    } catch (error) {
+      await logEvent("error", "restore.failed", {
+        source: "prerestore",
+        message: errorMessage(error),
+      });
+      throw error;
+    }
+  });
 }

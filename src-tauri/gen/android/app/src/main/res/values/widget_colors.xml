@@ -1,6 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- B1-C1 纸页：白底 + 1dp 描边 -->
     <color name="widget_bg_color">#FFFFFFFF</color>
-    <color name="widget_label_color">#FF6B7280</color>
-    <color name="widget_value_color">#FF1A1C20</color>
+    <color name="widget_border_color">#FFE2ECE7</color>
+    <!-- 标签 / 副标签 -->
+    <color name="widget_label_color">#FF566B63</color>
+    <!-- 今日数字（正常）、本月数字 -->
+    <color name="widget_value_color">#FF1D2A26</color>
+    <!-- 今日超日均、周期超支、超支预算条 -->
+    <color name="widget_expense_color">#FFB85C48</color>
+    <!-- 剩余预算（正常）、＋ 符号 -->
+    <color name="widget_remaining_color">#FF2F6B5E</color>
+    <!-- ＋ 圆底、预算条轨道 -->
+    <color name="widget_chip_color">#FFEEF5F1</color>
+    <color name="widget_plus_color">#FF2F6B5E</color>
+    <!-- 预算条正常填充（深色下比数字墨青更深） -->
+    <color name="widget_bar_fill_color">#FF2F6B5E</color>
 </resources>

@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useAppBack } from "../hooks/useAppBack";
+import { useAppNavigate } from "../hooks/useAppNavigate";
 import { useTranslation } from "react-i18next";
+import { ChevronRight } from "lucide-react";
 import type { EChartsOption } from "echarts";
 import type { BillKind, BillRow, Category, DateRange } from "../db";
 import {
@@ -10,7 +13,8 @@ import {
   getBudgets,
   loadCategoryRows,
 } from "../db";
-import { buildCategoryTree, rollupByNode, rollupByTopLevel } from "../lib/category";
+import { buildCategoryTree, findCategory, rollupByNode, rollupByTopLevel } from "../lib/category";
+import { periodRange } from "../lib/stats";
 import {
   type BudgetRowMeta,
   annotateBudgetRows,
@@ -19,25 +23,35 @@ import {
   isOverBudget,
 } from "../lib/budget";
 import { cssColor, formatMoneyCompact } from "../lib/format";
+import { errorMessage, logEvent } from "../lib/logger";
 import { cn } from "../lib/cn";
 import { getSetting } from "../settings";
 import { Chart } from "../components/Chart";
 import { Segmented } from "../components/ui/Segmented";
 import { IconBadge } from "../components/ui/IconBadge";
 import { ErrorState } from "../components/ui/ErrorState";
+import { PageHeader } from "../components/ui/PageHeader";
 import { useLocale } from "../hooks/useLocale";
 
+/** ECharts 默认亮色盘：环形图与图例按同一顺序取色（"其他"片另用中性灰） */
 const DONUT_PALETTE = [
-  "#8FB8F8", "#E8A23C", "#35C6E8", "#2FBF8F", "#F0C840",
-  "#F07070", "#6C7BF0", "#E88BC0", "#98D861", "#B0A6F5",
-  "#45B8AC", "#D98E5F", "#7FA65B", "#C77DB3", "#8C9BAB", "#5B8DC9",
+  "#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de",
+  "#3ba272", "#fc8452", "#9a60b4", "#ea7ccc",
 ];
 /** "其他"扇区与图例统一使用的颜色（暗色下也保持一致） */
-const OTHER_COLOR = "#9AA0A6";
+const OTHER_COLOR = "#8A918B";
 
 interface StatsData {
   bills: BillRow[];
   roots: Category[];
+}
+
+interface StatsSnapshot {
+  mode: "monthly" | "yearly";
+  month: { y: number; m: number };
+  year: number;
+  shareKind: BillKind;
+  drillIds: number[];
 }
 
 function pad2(n: number): string {
@@ -48,14 +62,22 @@ export function Stats() {
   const { t } = useTranslation();
   const { locale } = useLocale();
   const goBack = useAppBack();
+  const navigate = useAppNavigate();
+  const location = useLocation();
+  const saved = (location.state as { stats?: StatsSnapshot } | null)?.stats;
+  const restoreDrillIds = useRef<number[] | null>(saved?.drillIds ?? null);
 
   const now = new Date();
-  const [mode, setMode] = useState<"monthly" | "yearly">("monthly");
-  const [month, setMonth] = useState({ y: now.getFullYear(), m: now.getMonth() + 1 });
-  const [year, setYear] = useState(now.getFullYear());
-  const [dailyKind, setDailyKind] = useState<BillKind>("expense");
-  const [shareKind, setShareKind] = useState<BillKind>("expense");
-  const [showAll, setShowAll] = useState(false);
+  const [mode, setMode] = useState<"monthly" | "yearly">(
+    saved?.mode ?? "monthly",
+  );
+  const [month, setMonth] = useState(
+    saved?.month ?? { y: now.getFullYear(), m: now.getMonth() + 1 },
+  );
+  const [year, setYear] = useState(saved?.year ?? now.getFullYear());
+  const [shareKind, setShareKind] = useState<BillKind>(
+    saved?.shareKind ?? "expense",
+  );
   const [drillPath, setDrillPath] = useState<Category[]>([]);
   const [data, setData] = useState<StatsData | null>(null);
   const [failed, setFailed] = useState(false);
@@ -131,16 +153,13 @@ export function Stats() {
     setLoading(true);
     (async () => {
       try {
-        let from: string;
-        let to: string;
-        if (mode === "monthly") {
-          const last = new Date(month.y, month.m, 0).getDate();
-          from = `${month.y}-${pad2(month.m)}-01`;
-          to = `${month.y}-${pad2(month.m)}-${pad2(last)}`;
-        } else {
-          from = `${year}-01-01`;
-          to = `${year}-12-31`;
-        }
+        const range = periodRange(
+          mode,
+          mode === "monthly" ? month.y : year,
+          mode === "monthly" ? month.m : 1,
+        );
+        const from = range.from;
+        const to = range.to;
         const day = Math.min(
           Math.max(Number((await getSetting("billing_day")) ?? "1") || 1, 1),
           28,
@@ -165,8 +184,14 @@ export function Stats() {
           cycle,
         });
         setLoading(false);
-      } catch {
+      } catch (error) {
         if (!alive) return;
+        void logEvent("error", "stats.load.failed", {
+          mode,
+          year: mode === "monthly" ? month.y : year,
+          month: mode === "monthly" ? month.m : undefined,
+          message: errorMessage(error),
+        });
         setFailed(true);
         setLoading(false);
       }
@@ -175,6 +200,17 @@ export function Stats() {
       alive = false;
     };
   }, [mode, month, year, reloadKey]);
+
+  // 从类别页返回时按 id 恢复内联下钻路径；数据重查后再解析，避免缓存 Category 对象
+  useEffect(() => {
+    if (!data || restoreDrillIds.current === null) return;
+    const ids = restoreDrillIds.current;
+    restoreDrillIds.current = null;
+    const path = ids
+      .map((id) => findCategory(data.roots, id))
+      .filter((cat): cat is Category => Boolean(cat));
+    setDrillPath(path);
+  }, [data]);
 
   const totals = useMemo(() => {
     let expense = 0;
@@ -186,15 +222,16 @@ export function Stats() {
     return { expense, income, net: income - expense };
   }, [data]);
 
-  // 每日 / 每月 序列（按当前 kind）
+  // 每日序列：趋势图固定同时算收支；月度下方统计仍按支出取
   const seriesByDay = useMemo(() => {
-    const map = new Map<string, number>();
+    const expense = new Map<string, number>();
+    const income = new Map<string, number>();
     for (const b of data?.bills ?? []) {
-      if (b.kind !== dailyKind) continue;
+      const map = b.kind === "expense" ? expense : income;
       map.set(b.date, (map.get(b.date) ?? 0) + b.amount_cents);
     }
-    return map;
-  }, [data, dailyKind]);
+    return { expense, income };
+  }, [data]);
 
   const monthlyTrend = useMemo(() => {
     const expense = new Array(12).fill(0);
@@ -225,7 +262,7 @@ export function Stats() {
 
   const dailyStats = useMemo(() => {
     if (mode !== "monthly") return null;
-    const values = [...seriesByDay.values()];
+    const values = [...seriesByDay.expense.values()];
     if (values.length === 0) return null;
     const total = values.reduce((s, v) => s + v, 0);
     const daysInMonth = new Date(month.y, month.m, 0).getDate();
@@ -238,29 +275,34 @@ export function Stats() {
     };
   }, [seriesByDay, mode, month]);
 
-  const yearlyStats = useMemo(() => {
-    if (mode !== "yearly") return null;
-    const series = monthlyTrend[dailyKind === "expense" ? "expense" : "income"];
-    const total = series.reduce((sum, v) => sum + v, 0);
-    const nonZero = series.filter((v) => v > 0);
-    if (nonZero.length === 0) return null;
-    return {
-      max: Math.max(...nonZero),
-      // 与月度一致：年内存在没记账的月份时，最低月为 0
-      min: nonZero.length < 12 ? 0 : Math.min(...nonZero),
-      avg: Math.round(total / 12),
-    };
-  }, [monthlyTrend, mode, dailyKind]);
-
   const ink3 = useMemo(() => cssColor("--color-ink-3"), [themeRevision]);
   const lineColor = useMemo(() => cssColor("--color-line"), [themeRevision]);
+  const dailyBarColor = useMemo(() => cssColor("--color-expense"), [themeRevision]);
+  const chartFont =
+    '"Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif';
   const axisCommon = useMemo(
     () => ({
       axisLine: { lineStyle: { color: lineColor } },
-      axisLabel: { color: ink3, fontSize: 10 },
+      axisTick: { show: false },
+      axisLabel: { color: ink3, fontSize: 9, fontFamily: chartFont },
       splitLine: { lineStyle: { color: lineColor } },
     }),
     [ink3, lineColor],
+  );
+  const tooltipStyle = useMemo(
+    () => ({
+      backgroundColor: cssColor("--color-card"),
+      borderColor: cssColor("--color-line"),
+      borderWidth: 1,
+      padding: [6, 9],
+      textStyle: {
+        color: cssColor("--color-ink"),
+        fontSize: 11,
+        fontFamily: chartFont,
+      },
+      extraCssText: "border-radius:8px;box-shadow:0 8px 20px -10px rgba(29,42,38,.18);",
+    }),
+    [themeRevision],
   );
 
   const dailyOption = useMemo<EChartsOption>(() => {
@@ -269,67 +311,101 @@ export function Stats() {
     const values: number[] = [];
     for (let d = 1; d <= daysInMonth; d++) {
       const key = `${month.y}-${pad2(month.m)}-${pad2(d)}`;
-      dayLabels.push(pad2(d));
-      values.push((seriesByDay.get(key) ?? 0) / 100);
+      // 轴标签用 MM-DD（如 11-01），tooltip 头也沿用同一日期
+      dayLabels.push(`${pad2(month.m)}-${pad2(d)}`);
+      values.push((seriesByDay.expense.get(key) ?? 0) / 100);
     }
     return {
-      grid: { left: 44, right: 8, top: 16, bottom: 24 },
-      xAxis: { type: "category", data: dayLabels, ...axisCommon },
-      yAxis: { type: "value", ...axisCommon },
+      grid: { left: 38, right: 6, top: 14, bottom: 22 },
+      xAxis: {
+        type: "category",
+        data: dayLabels,
+        ...axisCommon,
+        // 31 个日期标签会挤在一起：每 5 天显示一个（约 6~7 个）
+        axisLabel: { ...axisCommon.axisLabel, interval: 5 },
+      },
+      // 柱图去掉横向网格、只留基线；axisCommon 与月趋势共用，不能直接改
+      yAxis: { type: "value", ...axisCommon, splitLine: { show: false } },
       tooltip: {
         trigger: "axis",
-        valueFormatter: (v) => `¥${formatMoneyCompact(Math.round(Number(v) * 100), locale)}`,
+        ...tooltipStyle,
+        valueFormatter: (v) =>
+          `¥${formatMoneyCompact(Math.round(Number(v) * 100), locale)}`,
       },
       series: [
         {
           type: "bar",
           data: values,
-          barMaxWidth: 10,
+          barMaxWidth: 6,
           itemStyle: {
-            color: cssColor(dailyKind === "expense" ? "--color-expense" : "--color-income"),
+            color: dailyBarColor,
             borderRadius: [3, 3, 0, 0],
           },
         },
       ],
     };
-  }, [month, seriesByDay, dailyKind, axisCommon, locale]);
+  }, [month, seriesByDay, axisCommon, locale, tooltipStyle, dailyBarColor]);
 
   const trendOption = useMemo<EChartsOption>(() => {
-    const kindName =
-      dailyKind === "expense" ? t("stats.expense") : t("stats.income");
-    const color = cssColor(
-      dailyKind === "expense" ? "--color-expense" : "--color-income",
-    );
     const monthLabels = Array.from({ length: 12 }, (_, i) => `${i + 1}`);
+    const expenseName = t("stats.expense");
+    const incomeName = t("stats.income");
+    const expenseColor = cssColor("--color-expense");
+    const incomeColor = cssColor("--color-income");
     return {
-      grid: { left: 44, right: 8, top: 24, bottom: 24 },
+      grid: { left: 38, right: 6, top: 18, bottom: 38 },
       xAxis: { type: "category", data: monthLabels, ...axisCommon },
+      // 收入/支出固定共用同一 Y 轴，便于直接比较
       yAxis: { type: "value", ...axisCommon },
       tooltip: {
         trigger: "axis",
-        valueFormatter: (v) => `¥${formatMoneyCompact(Math.round(Number(v) * 100), locale)}`,
+        ...tooltipStyle,
+        valueFormatter: (v) =>
+          `¥${formatMoneyCompact(Math.round(Number(v) * 100), locale)}`,
       },
       legend: {
         bottom: 0,
-        itemWidth: 10,
-        itemHeight: 10,
-        textStyle: { color: ink3, fontSize: 10 },
-        data: [kindName],
+        itemWidth: 8,
+        itemHeight: 8,
+        icon: "circle",
+        textStyle: { color: ink3, fontSize: 9 },
+        data: [expenseName, incomeName],
+        selectedMode: false,
       },
       series: [
         {
-          name: kindName,
+          name: expenseName,
           type: "line",
           smooth: true,
-          data: monthlyTrend[dailyKind].map((v) => v / 100),
+          data: monthlyTrend.expense.map((v) => v / 100),
           symbol: "circle",
           symbolSize: 5,
-          lineStyle: { width: 2, color },
-          itemStyle: { color },
+          lineStyle: { width: 2, color: expenseColor },
+          itemStyle: { color: expenseColor },
+          z: 2,
+        },
+        {
+          name: incomeName,
+          type: "line",
+          smooth: true,
+          data: monthlyTrend.income.map((v) => v / 100),
+          symbol: "circle",
+          symbolSize: 5,
+          lineStyle: { width: 2, color: incomeColor },
+          itemStyle: { color: incomeColor },
+          z: 3,
         },
       ],
     };
-  }, [monthlyTrend, axisCommon, ink3, t, dailyKind, locale]);
+  }, [
+    monthlyTrend,
+    axisCommon,
+    ink3,
+    t,
+    locale,
+    themeRevision,
+    tooltipStyle,
+  ]);
 
   const totalKindCents = shares.reduce((s, x) => s + x.cents, 0);
   const catName = (c: Category) => (c.name_key ? t(c.name_key) : c.name);
@@ -340,7 +416,7 @@ export function Stats() {
       ? t("stats.totalExpense")
       : t("stats.totalIncome");
   const donutOption = useMemo<EChartsOption>(() => {
-    const top = showAll ? shares : shares.slice(0, 5);
+    const top = shares.slice(0, 5);
     const data: {
       name: string;
       value: number;
@@ -352,8 +428,8 @@ export function Stats() {
       catId: s.cat.id,
       itemStyle: { color: DONUT_PALETTE[i % DONUT_PALETTE.length] },
     }));
-    // 折叠状态把第 6 名之后的分类合并成"其他"一片，保证扇区之和 = 中心总额
-    if (!showAll && otherCents > 0) {
+    // 第 6 名之后合并成"其他"一片，保证扇区之和 = 中心总额
+    if (otherCents > 0) {
       data.push({
         name: t("stats.other"),
         value: otherCents / 100,
@@ -361,13 +437,21 @@ export function Stats() {
       });
     }
     return {
-      tooltip: { valueFormatter: (v) => `¥${v}` },
+      tooltip: {
+        ...tooltipStyle,
+        valueFormatter: (v) =>
+          `¥${formatMoneyCompact(Math.round(Number(v) * 100), locale)}`,
+      },
       series: [
         {
           type: "pie",
-          radius: ["62%", "88%"],
+          radius: ["64%", "90%"],
           center: ["50%", "50%"],
           label: { show: false },
+          itemStyle: {
+            borderColor: cssColor("--color-card"),
+            borderWidth: 2,
+          },
           animationDuration: 600,
           animationDurationUpdate: 300,
           animationType: "expansion",
@@ -383,22 +467,22 @@ export function Stats() {
             text: `${formatMoneyCompact(totalKindCents, locale)}\n${centerLabel}`,
             textAlign: "center",
             fill: cssColor("--color-ink"),
-            fontSize: 13,
+            fontSize: 14,
             fontWeight: 600,
-            lineHeight: 18,
+            lineHeight: 20,
           },
         },
       ],
     };
   }, [
     shares,
-    showAll,
     otherCents,
     totalKindCents,
     locale,
     centerLabel,
     t,
     themeRevision,
+    tooltipStyle,
   ]);
 
   /** 单击下钻：仅带未隐藏子分类的分类可下钻；下钻层的"本级"桶（自身）不可再进 */
@@ -421,47 +505,64 @@ export function Stats() {
     [shares, drillPath, t],
   );
 
-  const legend = showAll ? shares : shares.slice(0, 5);
+  const legend = shares.slice(0, 5);
+
+  const goReport = () => {
+    const snapshot: StatsSnapshot = {
+      mode,
+      month,
+      year,
+      shareKind,
+      drillIds: drillPath.map((cat) => cat.id),
+    };
+    // 把 UI 快照写进当前 Stats 历史条目（不新增历史，也不与随后的 push 竞态），
+    // 返回时 Stats 从 location.state 恢复，账单数据仍会重新查询。
+    if (typeof window !== "undefined") {
+      const current = (window.history.state ?? {}) as Record<string, unknown>;
+      window.history.replaceState(
+        { ...current, usr: { stats: snapshot } },
+        "",
+      );
+    }
+    const params = new URLSearchParams({
+      mode,
+      year: String(mode === "monthly" ? month.y : year),
+      kind: shareKind,
+    });
+    if (mode === "monthly") params.set("month", String(month.m));
+    const parent = drillPath[drillPath.length - 1];
+    if (parent) params.set("parent", String(parent.id));
+    navigate(`/stats/categories?${params.toString()}`);
+  };
 
   return (
     <div className="flex h-full flex-col bg-page">
-      {/* 顶栏 */}
-      <div className="flex items-center px-2 pt-[max(env(safe-area-inset-top),0.5rem)] pb-1">
-        <button
-          type="button"
-          className="flex h-10 w-10 items-center justify-center rounded-full text-xl text-ink active:bg-chip"
-          onClick={goBack}
-          aria-label={t("common.back")}
-        >
-          ‹
-        </button>
-        <div className="flex flex-1 justify-center">
-          <Segmented
-            block={false}
-            options={[
-              { value: "monthly", label: t("stats.monthly") },
-              { value: "yearly", label: t("stats.yearly") },
-            ]}
-            value={mode}
-            onChange={setMode}
-          />
-        </div>
-        <div className="w-10" />
+      <PageHeader title={t("nav.stats")} onBack={goBack} />
+
+      <div className="px-3 pb-1 pt-1">
+        <Segmented
+          options={[
+            { value: "monthly", label: t("stats.monthly") },
+            { value: "yearly", label: t("stats.yearly") },
+          ]}
+          value={mode}
+          onChange={setMode}
+        />
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(2rem+env(safe-area-inset-bottom))]">
         {/* 月份 / 年份横滑条 */}
-        <div className="flex gap-2 overflow-x-auto py-2">
+        <div className="flex gap-1.5 overflow-x-auto py-2.5">
           {mode === "monthly"
             ? months.map((m) => (
                 <button
                   key={`${m.y}-${m.m}`}
                   type="button"
                   className={cn(
-                    "shrink-0 rounded-full px-3 py-1 text-xs whitespace-nowrap",
+                    "shrink-0 rounded-[8px] px-2.5 py-1 text-[11px] whitespace-nowrap transition-colors",
                     m.y === month.y && m.m === month.m
-                      ? "bg-chip font-semibold text-brand"
-                      : "text-ink-3",
+                      ? "bg-brand-soft font-medium text-brand"
+                      : "text-ink-3 hover:bg-chip",
                   )}
                   onClick={() => setMonth(m)}
                 >
@@ -473,8 +574,10 @@ export function Stats() {
                   key={y}
                   type="button"
                   className={cn(
-                    "shrink-0 rounded-full px-3 py-1 text-xs",
-                    y === year ? "bg-chip font-semibold text-brand" : "text-ink-3",
+                    "shrink-0 rounded-[8px] px-2.5 py-1 text-[11px] transition-colors",
+                    y === year
+                      ? "bg-brand-soft font-medium text-brand"
+                      : "text-ink-3 hover:bg-chip",
                   )}
                   onClick={() => setYear(y)}
                 >
@@ -483,70 +586,71 @@ export function Stats() {
               ))}
         </div>
 
-        {/* 收支汇总横幅（加载/失败时只保留外壳，避免展示假 0/旧周期数据） */}
+        {/* 收支汇总（加载/失败时只保留外壳，避免展示假 0/旧周期数据） */}
         {failed ? (
-          <div className="pt-2">
+          <div className="pt-1">
             <ErrorState onRetry={() => setReloadKey((k) => k + 1)} />
           </div>
         ) : loading ? (
-          <div className="py-10 text-center text-sm text-ink-3">…</div>
+          <div className="paper py-12 text-center text-[13px] text-ink-3">…</div>
         ) : (
           <>
-        <div className="grid grid-cols-3 rounded-2xl bg-gradient-to-r from-brand-1 to-brand-2 p-4 text-white">
-          <div>
-            <div className="text-xs text-white/80">{t("stats.expense")}(¥)</div>
-            <div className="mt-1 truncate text-lg font-medium">
-              {formatMoneyCompact(totals.expense, locale)}
+            <div className="paper grid grid-cols-3 divide-x divide-line px-1 py-3.5">
+              <SummaryCell
+                label={t("stats.expense")}
+                cents={totals.expense}
+                locale={locale}
+                tone="expense"
+              />
+              <SummaryCell
+                label={t("stats.income")}
+                cents={totals.income}
+                locale={locale}
+                tone="income"
+              />
+              <SummaryCell
+                label={t("stats.net")}
+                cents={totals.net}
+                locale={locale}
+                tone="net"
+              />
             </div>
-          </div>
-          <div>
-            <div className="text-xs text-white/80">{t("stats.income")}(¥)</div>
-            <div className="mt-1 truncate text-lg font-medium">
-              {formatMoneyCompact(totals.income, locale)}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-white/80">{t("stats.net")}(¥)</div>
-            <div className="mt-1 truncate text-lg font-medium">
-              {formatMoneyCompact(totals.net, locale)}
-            </div>
-          </div>
-        </div>
 
         {budgetExec && budgetExec.rows.length > 0 && (
-          <section className="mt-3 rounded-2xl bg-card p-3">
-            <div className="flex items-center justify-between">
+          <section className="paper mt-3 p-3">
+            <div className="flex items-center justify-between gap-2">
               <CardTitle text={t("stats.budgetExecutionCurrent")} />
-              <span className="text-[10px] text-ink-3">
+              <span className="num text-[9px] text-ink-3">
                 {t("budget.cycleRange", {
                   from: budgetExec.cycle.from,
                   to: budgetExec.cycle.to,
                 })}
               </span>
             </div>
-            <div className="mt-2 flex flex-col gap-2.5">
+            <div className="mt-2.5 flex flex-col gap-2.5">
               {budgetExec.rows.map((row) => (
                 <div key={row.cat.id}>
-                  <div className="flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
                     <span className="min-w-0 flex-1 truncate text-ink-2">
                       {row.cat.name_key ? t(row.cat.name_key) : row.cat.name}
                       {row.hasBudgetedDescendant && (
-                        <span className="ml-1 text-[10px] text-ink-3">
+                        <span className="ml-1 text-[9px] text-ink-3">
                           {t("budget.includesChildren")}
                         </span>
                       )}
                     </span>
                     <span
                       className={cn(
-                        "shrink-0",
+                        "num shrink-0",
                         isOverBudget(row) ? "text-expense" : "text-ink-3",
                       )}
                     >
-                      {formatMoneyCompact(row.spent, locale)} / ¥
+                      {formatMoneyCompact(row.spent, locale)}
+                      <span className="text-ink-3"> / </span>
                       {formatMoneyCompact(row.budget, locale)}
                     </span>
                   </div>
-                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-chip">
+                  <div className="mt-1 h-[5px] overflow-hidden rounded-full bg-chip">
                     <div
                       className={cn(
                         "h-full rounded-full",
@@ -563,50 +667,32 @@ export function Stats() {
           </section>
         )}
 
-        {/* 每日收支 / 月趋势 */}
-        <section className="mt-3 rounded-2xl bg-card p-3">
-          <div className="flex items-center justify-between">
+        {/* 每日支出 / 月趋势 */}
+        <section className="paper mt-3 p-3">
+          <div className="flex items-center justify-between gap-2">
             <CardTitle
-              text={mode === "monthly" ? t("stats.dailyFlow") : t("stats.monthlyTrend")}
-            />
-            <Segmented
-              size="sm"
-              block={false}
-              options={[
-                { value: "expense", label: t("stats.expense") },
-                { value: "income", label: t("stats.income") },
-              ]}
-              value={dailyKind}
-              onChange={setDailyKind}
+              text={
+                mode === "monthly"
+                  ? t("stats.dailyExpense")
+                  : t("stats.monthlyTrend")
+              }
             />
           </div>
           <div className="h-56">
             <Chart option={mode === "monthly" ? dailyOption : trendOption} />
           </div>
           {mode === "monthly" && dailyStats && (
-            <div className="grid grid-cols-3 pt-2">
+            <div className="grid grid-cols-3 divide-x divide-line border-t border-line pt-3">
               <StatItem label={t("stats.maxDay")} value={dailyStats.max} locale={locale} />
               <StatItem label={t("stats.minDay")} value={dailyStats.min} locale={locale} />
               <StatItem label={t("stats.dailyAvg")} value={dailyStats.avg} locale={locale} />
             </div>
           )}
-          {mode === "yearly" && yearlyStats && (
-            <div className="grid grid-cols-3 pt-2">
-              <StatItem label={t("stats.maxMonth")} value={yearlyStats.max} locale={locale} />
-              <StatItem label={t("stats.minMonth")} value={yearlyStats.min} locale={locale} />
-              <StatItem label={t("stats.monthlyAvg")} value={yearlyStats.avg} locale={locale} />
-            </div>
-          )}
-          {mode === "yearly" && (
-            <div className="pt-1 text-right text-[10px] text-ink-3">
-              {t("stats.calendarMonths")}
-            </div>
-          )}
         </section>
 
         {/* 收支占比 */}
-        <section className="mt-3 rounded-2xl bg-card p-3">
-          <div className="flex items-center justify-between">
+        <section className="paper mt-3 p-3">
+          <div className="flex items-center justify-between gap-2">
             <CardTitle text={t("stats.categoryShare")} />
             <Segmented
               size="sm"
@@ -623,10 +709,10 @@ export function Stats() {
             />
           </div>
           {drillPath.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1 pb-1 text-xs text-ink-3">
+            <div className="flex flex-wrap items-center gap-1 pt-1 text-[11px] text-ink-3">
               <button
                 type="button"
-                className="rounded px-1 py-0.5 text-ink-2 active:bg-chip"
+                className="rounded-[6px] px-1 py-0.5 text-ink-2 transition-colors hover:bg-chip"
                 onClick={() => setDrillPath([])}
               >
                 {t("stats.all")}
@@ -637,7 +723,7 @@ export function Stats() {
                   <button
                     type="button"
                     className={cn(
-                      "rounded px-1 py-0.5 active:bg-chip",
+                      "rounded-[6px] px-1 py-0.5 transition-colors hover:bg-chip",
                       i === drillPath.length - 1 ? "font-medium text-ink" : "text-ink-2",
                     )}
                     onClick={() => setDrillPath(drillPath.slice(0, i + 1))}
@@ -648,13 +734,13 @@ export function Stats() {
               ))}
             </div>
           )}
-          <div className="flex items-center">
-            <div className="h-44 w-44 shrink-0">
+          <div className="flex items-center gap-1">
+            <div className="h-40 w-40 shrink-0">
               <Chart option={donutOption} onEvents={donutEvents} />
             </div>
-            <div className="ml-2 min-w-0 flex-1">
+            <div className="ml-1 min-w-0 flex-1">
               {data !== null && shares.length === 0 ? (
-                <div className="py-8 text-center text-sm text-ink-3">
+                <div className="py-8 text-center text-[12px] text-ink-3">
                   {t("common.empty")}
                 </div>
               ) : (
@@ -663,60 +749,68 @@ export function Stats() {
                     <button
                       key={s.cat.id}
                       type="button"
-                      className="flex w-full items-center rounded-lg py-1 text-left active:bg-chip"
+                      className="flex w-full items-center rounded-[8px] py-1 text-left transition-colors hover:bg-chip/60 active:bg-chip"
                       onClick={() => drill(s.cat)}
                     >
                       <span
-                        className="h-2 w-2 shrink-0 rounded-full"
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
                         style={{ backgroundColor: DONUT_PALETTE[i % DONUT_PALETTE.length] }}
                       />
-                      <div className="ml-2 flex min-w-0 flex-1 items-center gap-2">
-                        <IconBadge icon={s.cat.icon} iconImage={s.cat.icon_image} nameKey={s.cat.name_key} iconType={s.cat.icon_type} size="sm" iconSize={16} className="h-6 w-6 text-sm" />
-                        <span className="min-w-0 flex-1 truncate text-xs text-ink">
+                      <div className="ml-1.5 flex min-w-0 flex-1 items-center gap-1.5">
+                        <IconBadge
+                          icon={s.cat.icon}
+                          iconImage={s.cat.icon_image}
+                          nameKey={s.cat.name_key}
+                          iconType={s.cat.icon_type}
+                          size="sm"
+                          iconSize={13}
+                          className="h-6 w-6 text-[11px]"
+                        />
+                        <span className="min-w-0 flex-1 truncate text-[11px] text-ink">
                           {catName(s.cat)}
                         </span>
-                        <span className={cn("text-xs", shareKind === "expense" ? "text-expense" : "text-income")}>
+                        <span
+                          className={cn(
+                            "num text-[11px]",
+                            shareKind === "expense" ? "text-expense" : "text-income",
+                          )}
+                        >
                           {shareKind === "expense" ? "-" : "+"}
                           {formatMoneyCompact(s.cents, locale)}
-                        </span>
-                        <span className="w-9 text-right text-[10px] text-ink-3">
-                          {totalKindCents > 0
-                            ? `${Math.round((s.cents / totalKindCents) * 100)}%`
-                            : "0%"}
                         </span>
                       </div>
                     </button>
                   ))}
-                  {!showAll && otherCents > 0 && (
+                  {otherCents > 0 && (
                     <div className="flex items-center py-1">
                       <span
-                        className="h-2 w-2 shrink-0 rounded-full"
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
                         style={{ backgroundColor: OTHER_COLOR }}
                       />
-                      <div className="ml-2 flex min-w-0 flex-1 items-center gap-2">
-                        <span className="min-w-0 flex-1 truncate text-xs text-ink">
+                      <div className="ml-1.5 flex min-w-0 flex-1 items-center gap-1.5">
+                        <span className="min-w-0 flex-1 truncate text-[11px] text-ink">
                           {t("stats.other")}
                         </span>
-                        <span className={cn("text-xs", shareKind === "expense" ? "text-expense" : "text-income")}>
+                        <span
+                          className={cn(
+                            "num text-[11px]",
+                            shareKind === "expense" ? "text-expense" : "text-income",
+                          )}
+                        >
                           {shareKind === "expense" ? "-" : "+"}
                           {formatMoneyCompact(otherCents, locale)}
-                        </span>
-                        <span className="w-9 text-right text-[10px] text-ink-3">
-                          {totalKindCents > 0
-                            ? `${Math.round((otherCents / totalKindCents) * 100)}%`
-                            : "0%"}
                         </span>
                       </div>
                     </div>
                   )}
-                  {shares.length > 5 && (
+                  {shares.length > 0 && (
                     <button
                       type="button"
-                      className="pt-1 text-xs text-brand"
-                      onClick={() => setShowAll((v) => !v)}
+                      className="mt-0.5 flex items-center gap-0.5 text-[11px] text-brand"
+                      onClick={goReport}
                     >
-                      {showAll ? "﹀" : "›"}{" "}
-                      {showAll ? t("stats.collapse") : t("stats.viewAll")}
+                      {t("stats.viewAll")}
+                      <ChevronRight size={13} strokeWidth={1.9} />
                     </button>
                   )}
                 </>
@@ -731,16 +825,39 @@ export function Stats() {
   );
 }
 
-function CardTitle({ text }: { text?: string }) {
+function SummaryCell({
+  label,
+  cents,
+  locale,
+  tone,
+}: {
+  label: string;
+  cents: number;
+  locale: string;
+  tone: "expense" | "income" | "net";
+}) {
   return (
-    <div className="flex items-center gap-2">
-      <div className="relative h-4 w-4">
-        <div className="absolute top-0 left-0 h-2.5 w-2.5 rounded-[3px] bg-brand-1" />
-        <div className="absolute right-0 bottom-0 h-2.5 w-2.5 rounded-[3px] bg-brand-2" />
+    <div className="min-w-0 px-3">
+      <div className="text-[10px] text-ink-3">{label}</div>
+      <div
+        className={cn(
+          "num mt-1 truncate text-[17px] font-semibold tracking-[-0.02em]",
+          tone === "expense"
+            ? "text-expense"
+            : tone === "income"
+              ? "text-income"
+              : "text-net",
+        )}
+      >
+        <span className="mr-0.5 text-[11px] font-medium text-ink-3">¥</span>
+        {formatMoneyCompact(cents, locale)}
       </div>
-      <h2 className="text-sm font-bold text-ink">{text}</h2>
     </div>
   );
+}
+
+function CardTitle({ text }: { text?: string }) {
+  return <h2 className="text-[13px] font-semibold text-ink">{text}</h2>;
 }
 
 function StatItem({
@@ -753,11 +870,11 @@ function StatItem({
   locale: string;
 }) {
   return (
-    <div className="text-center">
-      <div className="text-sm font-bold text-ink">
-        {formatMoneyCompact(value, locale)}
+    <div className="min-w-0 px-1 text-center">
+      <div className="num truncate text-[13px] font-semibold text-ink">
+        ¥{formatMoneyCompact(value, locale)}
       </div>
-      <div className="mt-0.5 text-[10px] text-ink-3">{label}</div>
+      <div className="mt-0.5 text-[9px] text-ink-3">{label}</div>
     </div>
   );
 }

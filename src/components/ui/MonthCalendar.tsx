@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { yearMonthLabel } from "../../lib/format";
 import { cn } from "../../lib/cn";
 
@@ -73,15 +74,15 @@ export function MonthCalendar({ value, onChange, locale }: MonthCalendarProps) {
       <div className="flex items-center justify-between px-1 pb-2">
         <button
           type="button"
-          className="flex h-8 w-8 items-center justify-center rounded-full text-ink-2 active:bg-chip"
+          className="flex h-9 w-9 items-center justify-center rounded-full text-ink-2 transition-colors hover:bg-chip active:bg-chip"
           onClick={() => shiftMonth(-1)}
           aria-label={t("common.prevMonth")}
         >
-          ‹
+          <ChevronLeft size={19} strokeWidth={1.8} />
         </button>
         <button
           type="button"
-          className="rounded-full px-3 py-1 text-base font-semibold text-ink active:bg-chip"
+          className="rounded-[10px] px-3 py-1.5 text-[15px] font-semibold text-ink transition-colors hover:bg-chip active:bg-chip"
           onClick={() => {
             setJumpY(String(view.year));
             setJumpM(String(view.month + 1));
@@ -93,11 +94,11 @@ export function MonthCalendar({ value, onChange, locale }: MonthCalendarProps) {
         </button>
         <button
           type="button"
-          className="flex h-8 w-8 items-center justify-center rounded-full text-ink-2 active:bg-chip"
+          className="flex h-9 w-9 items-center justify-center rounded-full text-ink-2 transition-colors hover:bg-chip active:bg-chip"
           onClick={() => shiftMonth(1)}
           aria-label={t("common.nextMonth")}
         >
-          ›
+          <ChevronRight size={19} strokeWidth={1.8} />
         </button>
       </div>
 
@@ -110,7 +111,7 @@ export function MonthCalendar({ value, onChange, locale }: MonthCalendarProps) {
           <JumpInput value={jumpD} onChange={setJumpD} placeholder="DD" />
           <button
             type="button"
-            className="ml-1 shrink-0 rounded-full bg-gradient-to-r from-brand-1 to-brand-2 px-4 py-1.5 text-xs font-medium text-white"
+            className="ml-1 shrink-0 rounded-[9px] bg-book px-4 py-1.5 text-[12px] font-medium text-cream"
             onClick={applyJump}
           >
             {t("common.ok")}
@@ -137,7 +138,7 @@ export function MonthCalendar({ value, onChange, locale }: MonthCalendarProps) {
       >
         <div className="grid grid-cols-7">
           {weekdayLabels.map((wd, i) => (
-            <div key={i} className="py-1 text-center text-xs text-ink-3">
+            <div key={i} className="py-1 text-center text-[11px] text-ink-3">
               {weekdayFmt.format(new Date(2024, 0, 7 + wd))}
             </div>
           ))}
@@ -149,33 +150,33 @@ export function MonthCalendar({ value, onChange, locale }: MonthCalendarProps) {
           {Array.from({ length: leading }, (_, i) => (
             <div key={`blank-${i}`} />
           ))}
-        {Array.from({ length: total }, (_, i) => {
-          const day = i + 1;
-          const dateStr = `${view.year}-${pad2(view.month + 1)}-${pad2(day)}`;
-          const selected = dateStr === value;
-          const isToday = dateStr === todayStr;
-          const isFuture = dateStr > todayStr;
-          return (
-            <button
-              key={day}
-              type="button"
-              disabled={isFuture}
-              className={cn(
-                "mx-auto my-0.5 flex h-10 w-10 items-center justify-center rounded-full text-[15px]",
-                isFuture
-                  ? "text-ink-3/40"
-                  : selected
-                    ? "bg-gradient-to-r from-brand-1 to-brand-2 font-semibold text-white"
-                    : isToday
-                      ? "font-semibold text-brand"
-                      : "text-ink",
-              )}
-              onClick={() => onChange(dateStr)}
-            >
-              {day}
-            </button>
-          );
-        })}
+          {Array.from({ length: total }, (_, i) => {
+            const day = i + 1;
+            const dateStr = `${view.year}-${pad2(view.month + 1)}-${pad2(day)}`;
+            const selected = dateStr === value;
+            const isToday = dateStr === todayStr;
+            const isFuture = dateStr > todayStr;
+            return (
+              <button
+                key={day}
+                type="button"
+                disabled={isFuture}
+                className={cn(
+                  "mx-auto my-0.5 flex h-10 w-10 items-center justify-center rounded-[10px] text-[14px] transition-colors",
+                  isFuture
+                    ? "text-ink-3/40"
+                    : selected
+                      ? "bg-brand-soft font-semibold text-brand"
+                      : isToday
+                        ? "font-semibold text-brand hover:bg-chip"
+                        : "text-ink hover:bg-chip",
+                )}
+                onClick={() => onChange(dateStr)}
+              >
+                {day}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -197,7 +198,7 @@ function JumpInput({
       onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 4))}
       inputMode="numeric"
       placeholder={placeholder}
-      className="min-w-0 flex-1 rounded-lg border border-line bg-card px-2 py-1.5 text-center text-sm text-ink outline-none placeholder:text-ink-3 focus:border-brand"
+      className="min-w-0 flex-1 rounded-[8px] border border-line bg-card px-2 py-1.5 text-center text-[13px] text-ink outline-none placeholder:text-ink-3 focus:border-brand"
     />
   );
 }

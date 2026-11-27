@@ -1,28 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 4x1 桌面小组件（B1-C1）：今日支出为主，右侧本月/剩余两行，底部预算条。整卡点击记一笔。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="horizontal"
-    android:gravity="center_vertical"
-    android:paddingStart="12dp"
-    android:paddingEnd="12dp"
-    android:paddingTop="8dp"
-    android:paddingBottom="8dp"
-    android:background="@drawable/widget_bg">
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:paddingStart="14dp"
+    android:paddingTop="11dp"
+    android:paddingEnd="14dp"
+    android:paddingBottom="10dp"
+    android:contentDescription="@string/widget_action_add">
 
+    <!-- 顶部信息行：今日区块 + 右侧两行（本月 / 剩余）+ ＋ 圆钮 -->
     <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
         android:layout_weight="1"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
+        <!-- 今日支出：标签 10sp，数字 20sp/700（颜色由 provider 按是否超剩余日均切换） -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:orientation="vertical"
-            android:gravity="center">
+            android:gravity="center_vertical">
 
             <TextView
                 android:id="@+id/widget_today_label"
@@ -30,72 +34,138 @@
                 android:layout_height="wrap_content"
                 android:text="@string/widget_today"
                 android:textColor="@color/widget_label_color"
-                android:textSize="10sp" />
+                android:textSize="10sp"
+                android:includeFontPadding="false"
+                android:maxLines="1" />
 
             <TextView
                 android:id="@+id/widget_today_value"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
                 android:text="0"
                 android:textColor="@color/widget_value_color"
-                android:textSize="16sp"
+                android:textSize="20sp"
                 android:textStyle="bold"
+                android:letterSpacing="-0.03"
+                android:includeFontPadding="false"
                 android:maxLines="1"
                 android:ellipsize="end" />
         </LinearLayout>
 
+        <!-- 右侧两行：label + value 右对齐、基线对齐 -->
         <LinearLayout
-            android:layout_width="0dp"
+            android:id="@+id/widget_side"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
+            android:layout_marginStart="12dp"
             android:orientation="vertical"
-            android:gravity="center">
+            android:gravity="end">
 
-            <TextView
-                android:id="@+id/widget_month_label"
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/widget_month"
-                android:textColor="@color/widget_label_color"
-                android:textSize="10sp" />
+                android:orientation="horizontal"
+                android:baselineAligned="true">
 
-            <TextView
-                android:id="@+id/widget_month_value"
+                <TextView
+                    android:id="@+id/widget_month_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/widget_month"
+                    android:textColor="@color/widget_label_color"
+                    android:textSize="9.5sp"
+                    android:includeFontPadding="false"
+                    android:maxLines="1" />
+
+                <TextView
+                    android:id="@+id/widget_month_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="0"
+                    android:textColor="@color/widget_value_color"
+                    android:textSize="11.5sp"
+                    android:textStyle="bold"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+            </LinearLayout>
+
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="0"
-                android:textColor="@color/widget_value_color"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                android:maxLines="1"
-                android:ellipsize="end" />
+                android:layout_marginTop="3dp"
+                android:orientation="horizontal"
+                android:baselineAligned="true">
+
+                <TextView
+                    android:id="@+id/widget_budget_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/widget_budget"
+                    android:textColor="@color/widget_label_color"
+                    android:textSize="9.5sp"
+                    android:includeFontPadding="false"
+                    android:maxLines="1" />
+
+                <TextView
+                    android:id="@+id/widget_budget_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="--"
+                    android:textColor="@color/widget_remaining_color"
+                    android:textSize="11.5sp"
+                    android:textStyle="bold"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+            </LinearLayout>
         </LinearLayout>
 
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center">
-
-            <TextView
-                android:id="@+id/widget_budget_label"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/widget_budget"
-                android:textColor="@color/widget_label_color"
-                android:textSize="10sp" />
-
-            <TextView
-                android:id="@+id/widget_budget_value"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="0"
-                android:textColor="@color/widget_value_color"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                android:maxLines="1"
-                android:ellipsize="end" />
-        </LinearLayout>
+        <!-- ＋ 只作整卡可记一笔的提示，不单独接点击 -->
+        <TextView
+            android:id="@+id/widget_plus"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:layout_marginStart="12dp"
+            android:background="@drawable/widget_plus_bg"
+            android:gravity="center"
+            android:text="＋"
+            android:textColor="@color/widget_plus_color"
+            android:textSize="13sp"
+            android:includeFontPadding="false"
+            android:importantForAccessibility="no"
+            android:maxLines="1" />
     </LinearLayout>
+
+    <!-- 预算条：3dp，正常/超支两个 ProgressBar 由 provider 切 visibility -->
+    <FrameLayout
+        android:id="@+id/widget_bar"
+        android:layout_width="match_parent"
+        android:layout_height="3dp"
+        android:layout_marginTop="8dp">
+
+        <ProgressBar
+            android:id="@+id/widget_bar_normal"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:max="100"
+            android:progress="0"
+            android:indeterminate="false"
+            android:progressDrawable="@drawable/widget_bar_normal" />
+
+        <ProgressBar
+            android:id="@+id/widget_bar_over"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:max="100"
+            android:progress="100"
+            android:indeterminate="false"
+            android:progressDrawable="@drawable/widget_bar_over"
+            android:visibility="gone" />
+    </FrameLayout>
 </LinearLayout>

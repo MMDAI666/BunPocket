@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useAppBack } from "../hooks/useAppBack";
 import { useTranslation } from "react-i18next";
+import { ChevronRight } from "lucide-react";
 import {
-  type Category,
   type DateRange,
   billsInDateRange,
   budgetCycle,
+  daysUntilCycleEnd,
   getBudgets,
   loadCategoryRows,
   setBudget,
@@ -19,7 +20,8 @@ import {
   isOverBudget,
   topmostBudgetTotal,
 } from "../lib/budget";
-import { formatMoney, formatMoneyCompact } from "../lib/format";
+import { dateRangeDays, formatMoney, formatMoneyCompact } from "../lib/format";
+import { errorMessage, logEvent } from "../lib/logger";
 import { MAX_AMOUNT_CENTS } from "../lib/money";
 import { cn } from "../lib/cn";
 import { getSetting, setSetting } from "../settings";
@@ -27,6 +29,8 @@ import { Wheel } from "../components/ui/Wheel";
 import { Sheet } from "../components/ui/Sheet";
 import { IconBadge } from "../components/ui/IconBadge";
 import { ErrorState } from "../components/ui/ErrorState";
+import { BudgetRuler } from "../components/ui/BudgetRuler";
+import { PageHeader } from "../components/ui/PageHeader";
 import { toast } from "../components/ui/Toast";
 import { useLocale } from "../hooks/useLocale";
 
@@ -49,7 +53,7 @@ export function Budget() {
   const goBack = useAppBack();
   const { locale } = useLocale();
   const [total, setTotal] = useState<number | null>(null);
-  const [roots, setRoots] = useState<Category[]>([]);
+  const [spentTotal, setSpentTotal] = useState(0);
   const [billingDay, setBillingDay] = useState(1);
   const [cycle, setCycle] = useState<DateRange | null>(null);
   const [budgetRows, setBudgetRows] = useState<BudgetRowMeta[]>([]);
@@ -82,17 +86,24 @@ export function Budget() {
           (c) => c.kind === "expense",
         );
         setTotal(budgets.total > 0 ? budgets.total : null);
-        setRoots(expenseRoots);
         setBillingDay(billing);
         setCycle(cycleRange);
+        setSpentTotal(
+          bills
+            .filter((bill) => bill.kind === "expense" && !bill.exclude_budget)
+            .reduce((sum, bill) => sum + bill.amount_cents, 0),
+        );
         setBudgetRows(
           annotateBudgetRows(
             categoryBudgetRows(expenseRoots, budgets.byCategory, bills),
           ),
         );
         setLoading(false);
-      } catch {
+      } catch (error) {
         if (!alive) return;
+        void logEvent("error", "budget.load.failed", {
+          message: errorMessage(error),
+        });
         setFailed(true);
         setLoading(false);
       }
@@ -118,11 +129,20 @@ export function Budget() {
     setSaving(true);
     try {
       await setBudget(editCatId, cents);
+      await logEvent("info", "budget.set", {
+        category_id: editCatId,
+        amount_cents: cents,
+      });
       setEditCatId(null);
       if (editCatId === 0) setTotal(cents > 0 ? cents : null);
       // 重新加载整页数据：树/预算/已用统一由 categoryBudgetRows 重算
       setReloadKey((k) => k + 1);
-    } catch {
+    } catch (error) {
+      void logEvent("error", "budget.set.failed", {
+        category_id: editCatId,
+        amount_cents: cents,
+        message: errorMessage(error),
+      });
       toast.show(t("common.saveFailed"), "error");
     } finally {
       setSaving(false);
@@ -133,78 +153,99 @@ export function Budget() {
   const categoryBudgetSum = topmostBudgetTotal(budgetRows);
   const categorySumExceedsTotal =
     total != null && categoryBudgetSum > total;
+  const cycleDays = cycle ? dateRangeDays(cycle.from, cycle.to) : 1;
+  const daysLeft = cycle ? daysUntilCycleEnd(cycle) : 1;
+  const dayProgress = Math.min(
+    Math.max((cycleDays - daysLeft + 1) / cycleDays, 0),
+    1,
+  );
 
   return (
     <div className="flex h-full flex-col bg-page">
-      <div className="flex items-center px-2 pt-[max(env(safe-area-inset-top),0.5rem)] pb-1">
-        <button
-          type="button"
-          className="flex h-10 w-10 items-center justify-center rounded-full text-xl text-ink active:bg-chip"
-          onClick={goBack}
-          aria-label={t("common.back")}
-        >
-          ‹
-        </button>
-        <div className="flex-1 text-center text-base font-semibold text-ink">
-          {t("budget.title")}
-        </div>
-        <div className="w-10" />
-      </div>
+      <PageHeader title={t("budget.title")} onBack={goBack} />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(2rem+env(safe-area-inset-bottom))]">
         {failed ? (
           <ErrorState onRetry={() => setReloadKey((k) => k + 1)} />
         ) : loading ? (
-          <div className="py-10 text-center text-sm text-ink-3">…</div>
+          <div className="paper py-12 text-center text-[13px] text-ink-3">…</div>
         ) : (
           <>
-            <div className="rounded-2xl bg-card">
-              <button
-                type="button"
-                className="flex w-full items-center px-4 py-4 active:bg-chip"
-                onClick={() => openEdit(0, total)}
-              >
-                <span className="flex-1 text-[15px] text-ink">
-                  {t("budget.total")}
-                </span>
-                <span
-                  className={
-                    total != null
-                      ? "text-lg font-semibold text-brand"
-                      : "text-sm text-ink-3"
-                  }
+            <div className="paper p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[10px] text-ink-3">{t("budget.total")}</div>
+                  <button
+                    type="button"
+                    className={cn(
+                      "mt-1 block truncate text-left transition-colors",
+                      total != null ? "text-ink" : "text-ink-3",
+                    )}
+                    onClick={() => openEdit(0, total)}
+                  >
+                    {total != null ? (
+                      <span className="num text-[27px] leading-none font-semibold tracking-[-0.03em]">
+                        <span className="mr-1 align-top text-[14px] font-medium text-ink-3">
+                          ¥
+                        </span>
+                        {formatMoney(total, locale)}
+                      </span>
+                    ) : (
+                      <span className="text-[14px]">{t("budget.none")}</span>
+                    )}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className="shrink-0 rounded-[9px] border border-line px-2.5 py-1.5 text-[11px] text-ink-3 transition-colors hover:bg-chip"
+                  onClick={() => {
+                    setDayDraft(billingDay);
+                    setDayOpen(true);
+                  }}
                 >
-                  {total != null
-                    ? `¥${formatMoney(total, locale)}`
-                    : t("budget.none")}
-                </span>
-                <span className="ml-2 text-ink-3">›</span>
-              </button>
-              <div className="mx-4 border-t border-line" />
-              <button
-                type="button"
-                className="flex w-full items-center px-4 py-4 active:bg-chip"
-                onClick={() => {
-                  setDayDraft(billingDay);
-                  setDayOpen(true);
-                }}
-              >
-                <span className="flex-1 text-[15px] text-ink">
-                  {t("budget.billingDay")}
-                </span>
-                <span className="text-lg font-semibold text-ink">
-                  {billingDay}
-                </span>
-                <span className="ml-2 text-ink-3">›</span>
-              </button>
+                  {t("budget.billingDay")}{" "}
+                  <span className="num font-medium text-ink">{billingDay}</span>
+                </button>
+              </div>
+
+              {total != null && (
+                <div className="mt-3.5">
+                  <div className="flex items-baseline justify-between gap-2 text-[10px] text-ink-3">
+                    <span>
+                      {t("budget.used")}{" "}
+                      <span className="num text-[12px] font-semibold text-ink">
+                        ¥{formatMoneyCompact(spentTotal, locale)}
+                      </span>
+                    </span>
+                    <span className="num">
+                      {t("home.budgetDaysLeft")} {daysLeft}
+                      {t("home.budgetDaysUnit")}
+                    </span>
+                  </div>
+                  <BudgetRuler
+                    className="mt-2"
+                    spent={spentTotal}
+                    total={total}
+                    dayProgress={dayProgress}
+                    label={t("budget.total")}
+                  />
+                  {spentTotal > total && (
+                    <div className="mt-1.5 flex justify-end">
+                      <span className="stamp stamp-in text-expense">
+                        {t("budget.overBudget")}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex items-baseline justify-between px-1 pt-4 pb-2">
-              <h2 className="text-sm font-bold text-ink">
+              <h2 className="text-[13px] font-semibold text-ink">
                 {t("budget.byCategory")}
               </h2>
               {cycle && (
-                <span className="text-[10px] text-ink-3">
+                <span className="num text-[9px] text-ink-3">
                   {t("budget.cycleRange", {
                     from: cycle.from,
                     to: cycle.to,
@@ -213,12 +254,12 @@ export function Budget() {
               )}
             </div>
             {categorySumExceedsTotal && (
-              <div className="mb-2 rounded-xl bg-expense/10 px-3 py-2 text-xs text-expense">
+              <div className="mb-2 rounded-[9px] bg-peach-soft px-3 py-2 text-[11px] text-expense">
                 {t("budget.categorySumHint")}
               </div>
             )}
-            <div className="rounded-2xl bg-card">
-              {budgetRows.map((row) => {
+            <div className="paper overflow-hidden">
+              {budgetRows.map((row, index) => {
                 const { cat, depth, budget, spent } = row;
                 const over = isOverBudget(row);
                 return (
@@ -226,8 +267,8 @@ export function Budget() {
                     key={cat.id}
                     type="button"
                     className={cn(
-                      "w-full py-3 pr-3 text-left active:bg-chip",
-                      depth > 0 && "border-t border-line/60",
+                      "w-full py-3 pr-3 text-left transition-colors hover:bg-chip/40 active:bg-chip",
+                      index > 0 && "border-t border-line",
                     )}
                     style={{ paddingLeft: 16 + depth * 18 }}
                     onClick={() => openEdit(cat.id, budget > 0 ? budget : null)}
@@ -240,10 +281,10 @@ export function Budget() {
                         iconType={cat.icon_type}
                         size="sm"
                       />
-                      <span className="ml-2 min-w-0 flex-1 truncate text-[15px] text-ink">
+                      <span className="ml-2 min-w-0 flex-1 truncate text-[13px] text-ink">
                         {cat.name_key ? t(cat.name_key) : cat.name}
                         {row.hasBudgetedDescendant && (
-                          <span className="ml-1 text-[10px] text-ink-3">
+                          <span className="ml-1 text-[9px] text-ink-3">
                             {t("budget.includesChildren")}
                           </span>
                         )}
@@ -251,24 +292,28 @@ export function Budget() {
                       {budget > 0 ? (
                         <span
                           className={cn(
-                            "ml-2 shrink-0 text-sm",
+                            "num ml-2 shrink-0 text-[12px]",
                             over ? "font-medium text-expense" : "text-ink-2",
                           )}
                         >
-                          {formatMoneyCompact(spent, locale)} / ¥
+                          {formatMoneyCompact(spent, locale)}
+                          <span className="text-ink-3"> / </span>
                           {formatMoneyCompact(budget, locale)}
                         </span>
                       ) : (
-                        <span className="ml-2 shrink-0 text-xs text-ink-3">
+                        <span className="ml-2 shrink-0 text-[10px] text-ink-3">
                           {t("budget.used")}{" "}
-                          {formatMoneyCompact(spent, locale)} ·{" "}
-                          {t("budget.none")}
+                          {formatMoneyCompact(spent, locale)} · {t("budget.none")}
                         </span>
                       )}
-                      <span className="ml-2 text-ink-3">›</span>
+                      <ChevronRight
+                        size={14}
+                        strokeWidth={1.8}
+                        className="ml-1 shrink-0 text-ink-3"
+                      />
                     </div>
                     {budget > 0 && (
-                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-chip">
+                      <div className="mt-1.5 h-[5px] overflow-hidden rounded-full bg-chip">
                         <div
                           className={cn(
                             "h-full rounded-full",
@@ -280,22 +325,26 @@ export function Budget() {
                         />
                       </div>
                     )}
-                    {budget > 0 && over && (
-                      <div className="mt-1 text-[10px] text-expense">
-                        {t("budget.overBudget")}
-                      </div>
-                    )}
-                    {budget > 0 && row.childBudgetSum > budget && (
-                      <div className="mt-1 text-[10px] text-expense">
-                        {t("budget.childSumHint")}
+                    {(over || (budget > 0 && row.childBudgetSum > budget)) && (
+                      <div className="mt-1.5 flex items-center justify-end gap-2">
+                        {row.childBudgetSum > budget && (
+                          <span className="text-[9px] text-ink-3">
+                            {t("budget.childSumHint")}
+                          </span>
+                        )}
+                        {over && (
+                          <span className="stamp stamp-in text-expense">
+                            {t("budget.overBudget")}
+                          </span>
+                        )}
                       </div>
                     )}
                   </button>
                 );
               })}
             </div>
-            {roots.length === 0 && (
-              <div className="py-10 text-center text-sm text-ink-3">
+            {budgetRows.length === 0 && (
+              <div className="paper py-12 text-center text-[13px] text-ink-3">
                 {t("common.empty")}
               </div>
             )}
@@ -309,18 +358,18 @@ export function Budget() {
         onOpenChange={(v) => !v && setEditCatId(null)}
         title={editCatId === 0 ? t("budget.total") : t("budget.categoryAmount")}
         footer={
-          <div className="flex gap-3">
+          <div className="flex gap-2.5">
             <input
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
               inputMode="decimal"
               placeholder={t("budget.amountPlaceholder")}
-              className="min-w-0 flex-1 rounded-full border border-line bg-card px-4 py-2 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-brand"
+              className="min-w-0 flex-1 rounded-[9px] border border-line bg-card px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-3 focus:border-brand"
             />
             <button
               type="button"
               disabled={saving}
-              className="rounded-full bg-gradient-to-r from-brand-1 to-brand-2 px-5 text-sm font-medium text-white disabled:opacity-50"
+              className="rounded-[9px] bg-book px-5 py-2 text-[13px] font-medium text-cream disabled:opacity-50"
               onClick={() => void saveEdit()}
             >
               {t("common.save")}
@@ -328,7 +377,7 @@ export function Budget() {
           </div>
         }
       >
-        <div className="py-2 text-center text-sm text-ink-3">
+        <div className="py-2 text-center text-[12px] text-ink-3">
           {t("budget.amountPlaceholder")}
         </div>
       </Sheet>
@@ -344,17 +393,26 @@ export function Budget() {
         <button
           type="button"
           disabled={saving}
-          className="mt-2 w-full rounded-full bg-gradient-to-r from-brand-1 to-brand-2 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+          className="mt-2 w-full rounded-[10px] bg-book py-2.5 text-[13px] font-medium text-cream disabled:opacity-50"
           onClick={() => {
             if (saving) return;
             setSaving(true);
             void setSetting("billing_day", String(dayDraft))
-              .then(() => {
+              .then(async () => {
+                await logEvent("info", "budget.billingDay", {
+                  day: dayDraft,
+                });
                 setBillingDay(dayDraft);
                 setReloadKey((k) => k + 1);
                 setDayOpen(false);
               })
-              .catch(() => toast.show(t("common.saveFailed"), "error"))
+              .catch((error) => {
+                void logEvent("error", "budget.billingDay.failed", {
+                  day: dayDraft,
+                  message: errorMessage(error),
+                });
+                toast.show(t("common.saveFailed"), "error");
+              })
               .finally(() => setSaving(false));
           }}
         >
